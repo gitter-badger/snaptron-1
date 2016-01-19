@@ -24,7 +24,7 @@ import time
 #CMD_BUFFER_SIZE=16777216
 #CMD_BUFFER_SIZE=4194304
 PYTHON_PATH='/data/gigatron/snaptron/python/bin/python'
-LOCAL_APP = '/data/gigatron/snaptron/snaptron.py'
+LOCAL_APP = '/data/gigatron/gtex_snaptron/snaptron.py'
 CMD_BUFFER_SIZE = -1
 #in seconds, so just under an hour to cache the authorization result for a specific token/acm_url
 TIME_TO_MEMOIZE_AUTH_RESULT=3500
@@ -36,7 +36,7 @@ READ_SIZE = 16777216
 #for test read much smaller chunks
 #READ_SIZE=32
 
-logger = logging.getLogger("snaptronws")
+logger = logging.getLogger("gtex_snaptronws")
 logger.setLevel(logging.INFO)
 lHandler = logging.StreamHandler()
 #sHandler = logging.handlers.SysLogHandler()
