@@ -140,8 +140,10 @@ def range_query_parser(rangeq,rquery_will_be_index=False):
             rquery[col]=(operators[op],val)
             continue
         #add first rquery to the rquery hash if we're not going to be
-        #used as an index
-        if not rquery_will_be_index:
+        #used as an index 
+        #OR the case where it's floating point and we need to work around
+        #Tabix's lack of support for that
+        if not rquery_will_be_index or 'avg' in col or 'median' in col:
             rquery[col]=(operators[op],val)
         #if we are used for the index,
         #then for 2nd pass columns where the value could be 0 (GTEx)
@@ -154,6 +156,8 @@ def range_query_parser(rangeq,rquery_will_be_index=False):
         tdb=TABIX_DBS[col]
         first_tdb=tdb
         extension=""
+        #since tabix only takes integers, round to nearest integer
+        val = round(val)
         if op == '=':
             extension="-%d" % (val)
         if op == '<=':
