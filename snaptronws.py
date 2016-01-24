@@ -20,11 +20,12 @@ from os import O_NONBLOCK, read
 import errno
 import time
 
+DEBUG_MODE=True
 #size for the OS buffer on the input pipe reading from samtools output
 #CMD_BUFFER_SIZE=16777216
 #CMD_BUFFER_SIZE=4194304
 PYTHON_PATH='/data/gigatron/snaptron/python/bin/python'
-LOCAL_APP = '/data/gigatron/snaptron/snaptron.py'
+LOCAL_APP = '/data/gigatron/test_snaptron/snaptron.py'
 CMD_BUFFER_SIZE = -1
 #in seconds, so just under an hour to cache the authorization result for a specific token/acm_url
 TIME_TO_MEMOIZE_AUTH_RESULT=3500
@@ -96,13 +97,14 @@ class StreamingResponseIterator:
         self.closed = True
         if self.stream_subproc.returncode != 0 or len(self.stderr) > 0:
             errors = []
-            logger.error("in _wait, found an error")
+            logger.error("in _wait, found an error message")
             stderr = "".join(self.stderr)
             for line in stderr.split("\n"):
                 errors.append("%s:%s" % (LOCAL_APP, line.rstrip()))
                 logger.error("%s:%s" % (LOCAL_APP, line.rstrip()))
             #alert the server to the error by THROWING AN EXCEPTION (not re-calling start_response)
-            raise Exception("%s failed on %s" % (LOCAL_APP, ":::".join(errors)))
+            if self.stream_subproc.returncode != 0 or (not DEBUG_MODE and len(self.stderr) > 0):
+                raise Exception("%s failed on %s" % (LOCAL_APP, ":::".join(errors)))
 
     def _terminate(self):
         if self.closed:
@@ -121,7 +123,7 @@ class StreamingResponseIterator:
             self.done = True
             self._wait()
             if self.request_id is not None:
-                with open(os.path.join(tempfile.gettempdir(), "snaptron.%s" % self.request_id), "w") as hashfile:
+                with open(os.path.join(tempfile.gettempdir(), "test_snaptron.%s" % self.request_id), "w") as hashfile:
                     hashfile.write(self.content_hash.hexdigest())
             raise StopIteration
         #add this to the running checksum
@@ -180,7 +182,7 @@ def unauthorized(start_response):
     status = "401 Unauthorized"
     sys.stderr.write("%s\n" % (status))
     status_response = "%s\n%s\n" % (status,support_blurb)
-    response_headers = [('Content-type', 'text/plain'), ('WWW-Authenticate', 'Basic realm="CGHubSlicer"')]
+    response_headers = [('Content-type', 'text/plain'), ('WWW-Authenticate', 'Basic realm="Snaptron"')]
     start_response(status, response_headers)
     return status_response
 

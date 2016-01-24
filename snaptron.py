@@ -11,7 +11,7 @@ import operator
 import time
 
 operators={'>=':operator.ge,'<=':operator.le,'>':operator.gt,'<':operator.lt,'=':operator.eq,'!=':operator.ne}
-DEBUG_MODE=False
+DEBUG_MODE=True
 TABIX="tabix"
 #TABIX_INTERVAL_DB='all_SRA_introns_ids_stats.tsv.gz'
 TABIX_INTERVAL_DB='all_SRA_introns_ids_stats.tsv.new2_w_sourcedb2.gz'
@@ -20,11 +20,13 @@ TABIX_DBS={'chromosome':TABIX_INTERVAL_DB,'length':'by_length.gz','snaptron_id':
 SAMPLE_MD_FILE='/data2/gigatron2/all_illumina_sra_for_human_ids.tsv'
 SAMPLE_IDS_COL=12
 SAMPLE_ID_COL=0
-INTRON_ID_COL=1
+INTRON_ID_COL=0
 
 DATA_SOURCE='SRA'
-INTRON_URL='http://localhost:8090/solr/gigatron/select?q='
-SAMPLE_URL='http://localhost:8090/solr/sra_samples/select?q='
+#may have to adjust this parameter for performance (# of tabix calls varies inversely with this number)
+MAX_DISTANCE_BETWEEN_IDS=1000
+#INTRON_URL='http://localhost:8090/solr/gigatron/select?q='
+#SAMPLE_URL='http://localhost:8090/solr/sra_samples/select?q='
 
 INTRON_HEADER='snaptron_id	chromosome	start	end	length	strand	annotated?	left_motif	right_motif	left_annotated?	right_annotated?	samples	read_coverage_by_sample	samples_count	coverage_sum	coverage_avg	coverage_median	source_dataset_id'
 SAMPLE_HEADER=""
@@ -36,11 +38,11 @@ for field in INTRON_HEADER_FIELDS:
    i+=1
 
 
-def run_tabix(qargs,rquerys,tabix_db,filter_set=None,sample_set=None,filtering=False,debug=True):
+def run_tabix(qargs,rquerys,tabix_db,filter_set=None,sample_set=None,filtering=False,print_header=True,debug=True):
     tabix_db = "%s/%s" % (TABIX_DB_PATH,tabix_db)
     if debug:
         sys.stderr.write("running %s %s %s\n" % (TABIX,tabix_db,qargs))
-    if not filtering:
+    if not filtering and print_header:
         sys.stdout.write("DataSource:Type\t%s\n" % (INTRON_HEADER))
     ids_found=set()
     tabixp = subprocess.Popen("%s %s %s | cut -f 2-" % (TABIX,tabix_db,qargs),stdout=subprocess.PIPE,shell=True)
@@ -50,6 +52,7 @@ def run_tabix(qargs,rquerys,tabix_db,filter_set=None,sample_set=None,filtering=F
         if sample_set != None or filter_set != None:
              fields=line.rstrip().split("\t")
              if filter_set != None and fields[INTRON_ID_COL] not in filter_set:
+                 #sys.stderr.write("field %s not in filter_set\n" % (fields[INTRON_ID_COL]))
                  continue
              if filtering:
                  ids_found.add(fields[INTRON_ID_COL])
@@ -118,18 +121,43 @@ def stream_solr(solr_query,filter_set=None,sample_set=None,debug_mode=False):
             sample_set.add(fields[SAMPLE_ID_COL]) 
         line=solrR.readline()
 
+
+#do multiple searches by a set of ids
+def search_introns_by_ids(snaptron_ids):
+    sid_queries = []
+    start_sid = 1    
+    end_sid = 1
+    #coalesce the snaptron_ids into ranges
+    #to avoid making too many queries (n+1) to Tabix
+    for sid in sorted(snaptron_ids):
+        sid = int(sid)
+        dist = abs(sid - start_sid)
+        if dist <= MAX_DISTANCE_BETWEEN_IDS:
+           end_sid = sid
+        else:
+           sid_queries.append("1:%d-%d" % (start_sid,end_sid))
+           start_sid = sid
+           end_sid = sid
+    sid_queries.append("1:%d-%d" % (start_sid,end_sid))
+    print_header = True
+    for query in sid_queries:
+        #sys.stderr.write("query %s\n" % (query))
+        run_tabix(query,None,TABIX_DBS['snaptron_id'],filter_set=snaptron_ids,print_header=print_header,debug=DEBUG_MODE)
+        print_header = False
+             
+
+
 comp_op_pattern=re.compile(r'([=><!]+)')
 def range_query_parser(rangeq,rquery_will_be_index=False):
     rquery={}
+    snaptron_ids = []
     if rangeq is None or len(rangeq) < 1:
         return (None,None,rquery)
     fields = rangeq.split(',')
-    (first_tdb,first_rquery)=(None,None) #first_col,first_val1,first_val2)
-    #for (field_,tdb) in TABIX_DBS.iteritems():
+    (first_tdb,first_rquery)=(None,None)
     for field in fields:
         m=comp_op_pattern.search(field)
         (col,op_,val)=re.split(comp_op_pattern,field)
-        val=float(val)
         if not m or not col or col not in TABIX_DBS:
             continue
         op=m.group(1)
@@ -139,6 +167,11 @@ def range_query_parser(rangeq,rquery_will_be_index=False):
         if first_tdb:
             rquery[col]=(operators[op],val)
             continue 
+        #if col == 'snaptron_id' and len(fields) == 1:
+        if col == 'snaptron_id':
+            snaptron_ids = val.split('-')
+            return (None,None,None,snaptron_ids)
+        val=float(val)
         #add first rquery to the rquery hash if we're not going to be
         #used as an index 
         #OR the case where it's floating point and we need to work around
@@ -242,9 +275,14 @@ def main():
            stream_introns_from_samples(sample_set)
     #whether or not we use the interval query as a filter set or the whole query
     rquery_index = len(intervalq) < 1 and len(rangeq) >= 1
-    (first_tdb,first_rquery,rquery) = range_query_parser(rangeq,rquery_will_be_index=rquery_index)
-    if len(intervalq) >= 1:
+    (first_tdb,first_rquery,rquery,snaptron_ids) = range_query_parser(rangeq,rquery_will_be_index=rquery_index)
+    #a list of ids trumps any other query as it's a performance hack
+    if len(snaptron_ids) > 0:
+        search_introns_by_ids(snaptron_ids)
+    #back to usual processing, interval queries come first possibly with filters from the point range queries
+    elif len(intervalq) >= 1:
         run_tabix(intervalq,rquery,TABIX_INTERVAL_DB,sample_set=sample_set,debug=DEBUG_MODE_)
+    #if there's no interval query to use with tabix, use a point range query (first_rquery) with additional filters from the following point range queries
     elif len(rangeq) >= 1:
         run_tabix(first_rquery,rquery,first_tdb,sample_set=sample_set,debug=DEBUG_MODE_)
     if DEBUG_MODE_:
