@@ -23,8 +23,11 @@ SAMPLE_IDS_COL=9
 SAMPLE_ID_COL=0
 INTRON_ID_COL=1
 
+DATA_SOURCE='GTEx'
 INTRON_URL='http://localhost:8090/solr/gigatron/select?q='
 SAMPLE_URL='http://localhost:8090/solr/sra_samples/select?q='
+
+FLOAT_FIELDS=set(['coverage_avg','coverage_median','coverage_avg2','coverage_median2'])
 
 INTRON_HEADER='snaptron_id	chromosome	start	end	length	strand	left_motif	right_motif	samples	read_coverage_by_sample_pass1	read_coverage_by_sample_pass2	samples_count	coverage_sum	coverage_avg	coverage_median	coverage_sum2	coverage_avg2	coverage_median2	source_dataset_id'
 SAMPLE_HEADER=""
@@ -41,7 +44,7 @@ def run_tabix(qargs,rquerys,tabix_db,filter_set=None,sample_set=None,filtering=F
     if debug:
         sys.stderr.write("running %s %s %s\n" % (TABIX,tabix_db,qargs))
     if not filtering:
-        sys.stdout.write("Type\t%s\n" % (INTRON_HEADER))
+        sys.stdout.write("DataSource:Type\t%s\n" % (INTRON_HEADER))
     ids_found=set()
     tabixp = subprocess.Popen("%s %s %s | cut -f 2-" % (TABIX,tabix_db,qargs),stdout=subprocess.PIPE,shell=True)
     for line in tabixp.stdout:
@@ -63,19 +66,22 @@ def run_tabix(qargs,rquerys,tabix_db,filter_set=None,sample_set=None,filtering=F
                 fields=line.rstrip().split("\t")
             skip=False
             for rfield in rquerys.keys():
-                (op,val)=rquerys[rfield]
+                (op,rval)=rquerys[rfield]
                 if rfield not in INTRON_HEADER_FIELDS_MAP:
                     sys.stderr.write("bad field %s in range query,exiting\n" % (rfield))
                     sys.exit(-1)
                 fidx = INTRON_HEADER_FIELDS_MAP[rfield]
-                if not op(float(fields[fidx]),val):
+                val = int(fields[fidx])
+                if rfield in FLOAT_FIELDS:
+                    val = float(fields[fidx])
+                if not op(val,rval):
                     skip=True
                     break
             if skip:
                 continue
         #now just stream back the result
         if not filtering:
-            sys.stdout.write("I\t%s" % (line))
+            sys.stdout.write("%s:I\t%s" % (DATA_SOURCE,line))
     exitc=tabixp.wait() 
     if exitc != 0:
         raise RuntimeError("%s %s %s returned non-0 exit code\n" % (TABIX,TABIX_DB,args))
@@ -83,9 +89,9 @@ def run_tabix(qargs,rquerys,tabix_db,filter_set=None,sample_set=None,filtering=F
         return ids_found
 
 def stream_samples(sample_set,sample_map):
-    sys.stdout.write("Type\t%s\n" % (SAMPLE_HEADER))
+    sys.stdout.write("DataSource:Type\t%s\n" % (SAMPLE_HEADER))
     for sample_id in sample_set:
-        sys.stdout.write("S\t%s\n" % (sample_map[sample_id]))
+        sys.stdout.write("%s:S\t%s\n" % (DATA_SOURCE,sample_map[sample_id]))
 
 #use to load samples metadata to be returned
 #ONLY when the user requests by overlap coords OR
@@ -129,7 +135,9 @@ def range_query_parser(rangeq,rquery_will_be_index=False):
     for field in fields:
         m=comp_op_pattern.search(field)
         (col,op_,val)=re.split(comp_op_pattern,field)
-        val=float(val)
+        val=int(val)
+        if col in FLOAT_FIELDS:
+            val=float(val)
         if not m or not col or col not in TABIX_DBS:
             continue
         op=m.group(1)
@@ -149,9 +157,12 @@ def range_query_parser(rangeq,rquery_will_be_index=False):
         #then for 2nd pass columns where the value could be 0 (GTEx)
         #we need to add another predicate to avoid the 0
         #since tabix doesn't handle 0's and will return them
-        #even for a >=1 query
-        elif col[-1] == '2' and val > 0.0:
-            rquery[col]=(operators['>'],0.0)
+        #even for a >=1 query; also work around float vs. integer comparisons
+        elif col[-1] == '2':
+            if col[-1] in FLOAT_FIELDS and val > 0.0:
+                rquery[col]=(operators['>'],0.0)
+            elif col[-1] not in FLOAT_FIELDS and val > 0:
+                rquery[col]=(operators['>'],0)
         #only do the following for the first range query
         tdb=TABIX_DBS[col]
         first_tdb=tdb
