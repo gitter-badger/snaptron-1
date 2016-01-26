@@ -24,7 +24,7 @@ from org.apache.lucene.util import Version
  
 
 operators={'>=':operator.ge,'<=':operator.le,'>':operator.gt,'<':operator.lt,'=':operator.eq,'!=':operator.ne}
-DEBUG_MODE=True
+DEBUG_MODE=False
 TABIX="tabix"
 #TABIX_INTERVAL_DB='all_SRA_introns_ids_stats.tsv.gz'
 TABIX_INTERVAL_DB='all_SRA_introns_ids_stats.tsv.new2_w_sourcedb2.gz'
@@ -35,6 +35,8 @@ SAMPLE_IDS_COL=12
 SAMPLE_ID_COL=0
 INTRON_ID_COL=0
 LUCENE_MAX_HITS=1000
+
+FLOAT_FIELDS=set(['coverage_avg','coverage_median'])
 
 DATA_SOURCE='SRA'
 #may have to adjust this parameter for performance (# of tabix calls varies inversely with this number)
@@ -74,35 +76,37 @@ def run_tabix(qargs,rquerys,tabix_db,filter_set=None,sample_set=None,filtering=F
     for line in tabixp.stdout:
         fields=[]
         #build either filter set or sample set or both
-        if sample_set != None or filter_set != None:
+        if (sample_set != None and len(sample_set) > 0) or (filter_set != None and len(filter_set) > 0):
              fields=line.rstrip().split("\t")
              if filter_set != None and fields[INTRON_ID_COL] not in filter_set:
                  #sys.stderr.write("field %s not in filter_set\n" % (fields[INTRON_ID_COL]))
                  continue
-             if filtering:
-                 ids_found.add(fields[INTRON_ID_COL])
-                 continue
              if sample_set != None:
-                 sample_ids=set(fields[SAMPLE_IDS_COL].split(","))
-                 sample_set.update(sample_ids)
+                 sample_set.update(set(fields[SAMPLE_IDS_COL].split(",")))
         #filter return stream based on range queries (if any)
         if rquerys:
             if len(fields) == 0:
                 fields=line.rstrip().split("\t")
             skip=False
             for rfield in rquerys.keys():
-                (op,val)=rquerys[rfield]
+                (op,rval)=rquerys[rfield]
                 if rfield not in INTRON_HEADER_FIELDS_MAP:
                     sys.stderr.write("bad field %s in range query,exiting\n" % (rfield))
                     sys.exit(-1)
                 fidx = INTRON_HEADER_FIELDS_MAP[rfield]
-                if not op(float(fields[fidx]),val):
+                val = float(fields[fidx])
+                if rfield not in FLOAT_FIELDS:
+                    val = int(val)
+                if not op(val,rval):
                     skip=True
                     break
             if skip:
                 continue
+        if filtering:
+            ids_found.add(fields[INTRON_ID_COL])
+            continue
         #now just stream back the result
-        if not filtering:
+        else:
             sys.stdout.write("%s:I\t%s" % (DATA_SOURCE,line))
     exitc=tabixp.wait() 
     if exitc != 0:
@@ -217,11 +221,13 @@ def range_query_parser(rangeq,snaptron_ids,rquery_will_be_index=False):
         if col == 'snaptron_id':
             snaptron_ids.update(set(val.split('-')))
             continue
+        val=float(val)
+        if col not in FLOAT_FIELDS:
+            val=int(val)
         if first_tdb:
             rquery[col]=(operators[op],val)
             continue 
             #return (None,None,None,only_ids)
-        val=float(val)
         #add first rquery to the rquery hash if we're not going to be
         #used as an index 
         #OR the case where it's floating point and we need to work around
@@ -240,7 +246,7 @@ def range_query_parser(rangeq,snaptron_ids,rquery_will_be_index=False):
         first_tdb=tdb
         extension=""
         #since tabix only takes integers, round to nearest integer
-        val = round(val)
+        val = int(round(val))
         if op == '=':
             extension="-%d" % (val)
         if op == '<=':
@@ -315,7 +321,7 @@ def main():
     (intervalq,rangeq,sampleq) = input_.split('|')
     sample_map = load_sample_metadata(SAMPLE_MD_FILE)
     if DEBUG_MODE_:
-        sys.stderr.write("loaded %d samples metadata\n" % (len(samples_map)))
+        sys.stderr.write("loaded %d samples metadata\n" % (len(sample_map)))
     snaptron_ids = set()
     #if we have any sample related queries, do them first to get sample id set
     if len(sampleq) >= 1:
@@ -332,6 +338,8 @@ def main():
     (first_tdb,first_rquery,rquery) = range_query_parser(rangeq,snaptron_ids,rquery_will_be_index=rquery_index)
     #UPDATE if someone wants both by_ids and other queries we'll give them both by passing snaptron_ids later to the tabix method as a filter
     #otherwise we do by_id queries only
+    #sample_set is used to track samples we pick up from introns queried to stream them later (if desired)
+    sample_set = set()
     if len(snaptron_ids) > 0 and len(intervalq) == 0 and (len(rangeq) == 0 or not first_tdb):
         search_introns_by_ids(snaptron_ids)
     #back to usual processing, interval queries come first possibly with filters from the point range queries and/or ids
@@ -340,8 +348,6 @@ def main():
     #if there's no interval query to use with tabix, use a point range query (first_rquery) with additional filters from the following point range queries and/or ids
     elif len(rangeq) >= 1:
         run_tabix(first_rquery,rquery,first_tdb,filter_set=snaptron_ids,sample_set=sample_set,debug=DEBUG_MODE_)
-    if DEBUG_MODE_:
-        sys.stderr.write("found %d samples\n" % (len(sample_set)))
 
 if __name__ == '__main__':
     main()
