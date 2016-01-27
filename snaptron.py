@@ -19,12 +19,15 @@ from org.apache.lucene.document import Document, Field
 from org.apache.lucene.search import IndexSearcher
 from org.apache.lucene.index import IndexReader
 from org.apache.lucene.queryparser.classic import QueryParser
+from org.apache.lucene.queryparser.classic import MultiFieldQueryParser
+from org.apache.lucene.search import BooleanClause
 from org.apache.lucene.store import SimpleFSDirectory
 from org.apache.lucene.util import Version
- 
+
+import snaputil 
 
 operators={'>=':operator.ge,'<=':operator.le,'>':operator.gt,'<':operator.lt,'=':operator.eq,'!=':operator.ne}
-DEBUG_MODE=False
+DEBUG_MODE=True
 TABIX="tabix"
 #TABIX_INTERVAL_DB='all_SRA_introns_ids_stats.tsv.gz'
 TABIX_INTERVAL_DB='all_SRA_introns_ids_stats.tsv.new2_w_sourcedb2.gz'
@@ -35,6 +38,8 @@ SAMPLE_IDS_COL=12
 SAMPLE_ID_COL=0
 INTRON_ID_COL=0
 LUCENE_MAX_HITS=1000
+SAMPLE_QUERY_DELIMITER='==='
+SAMPLE_QUERY_FIELD_DELIMITER='::'
 
 FLOAT_FIELDS=set(['coverage_avg','coverage_median'])
 
@@ -116,20 +121,20 @@ def run_tabix(qargs,rquerys,tabix_db,filter_set=None,sample_set=None,filtering=F
 
 #based on the example code at
 #http://graus.nu/blog/pylucene-4-0-in-60-seconds-tutorial/
-def search_samples_lucene(sample_map,fields_to_search,query_string,sample_set,stream_sample_metadata=False):
-    #query = QueryParser(Version.LUCENE_4_10_1, "description_t", analyzer).parse("human AND adult AND brain")
-    query = QueryParser(Version.LUCENE_4_10_1, fields_to_search, analyzer).parse(query_string)
+def search_samples_lucene(sample_map,sampleq,sample_set,stream_sample_metadata=False):
+    (fields,queries,booleans) = lucene_query_parse(sampleq)
+    query = MultiFieldQueryParser.parse(Version.LUCENE_4_10_1, queries, fields, booleans, analyzer)
+    #query = MultiFieldQueryParser.parse(Version.LUCENE_4_10_1, ['human AND adult AND brain'], ['description_t'], [BooleanClause.Occur.MUST], analyzer)
     hits = searcher.search(query, LUCENE_MAX_HITS)
-    sample_set = set() 
     if DEBUG_MODE: 
-        sys.stderr.write("Found %d document(s) that matched query '%s':\n" % (hits.totalHits, query_string))
+        sys.stderr.write("Found %d document(s) that matched query '%s':\n" % (hits.totalHits, sampleq))
     if stream_sample_metadata:
         sys.stdout.write("DataSource:Type\t%s\n" % (SAMPLE_HEADER))
     for hit in hits.scoreDocs:
         doc = searcher.doc(hit.doc)
         sid = doc.get("intropolis_sample_id_i")
         #track the sample ids if asked to
-        if sample_set:
+        if sample_set != None:
             sample_set.add(sid)
         #stream back the full sample metadata record from the in-memory dictionary
         if stream_sample_metadata:
@@ -140,40 +145,45 @@ def stream_samples(sample_set,sample_map):
     for sample_id in sample_set:
         sys.stdout.write("%s:S\t%s\n" % (DATA_SOURCE,sample_map[sample_id]))
 
-def parse_sample_query(sampleq):
-    return ('description_t','human AND adult AND brain')
+def lucene_query_parse(sampleq):
+    queries_ = sampleq.split(SAMPLE_QUERY_DELIMITER)
+    fields = []
+    queries = []
+    booleans = []
+    for query_tuple in queries_:
+        (field,query) = query_tuple.split(SAMPLE_QUERY_FIELD_DELIMITER)
+        fields.append(field)
+        query = query.replace('AND',' AND ')
+        #sys.stderr.write("query + fields: %s %s\n" % (query,field))
+        queries.append(query)
+        booleans.append(BooleanClause.Occur.MUST)
+    return (fields,queries,booleans)
 
 #use to load samples metadata to be returned
 #ONLY when the user requests by overlap coords OR
 #coords and/or non-sample metadata thresholds (e.g. coverage)
 #otherwise we'll return the whole thing from SOLR instead
 def load_sample_metadata(file_):
+    start = time.time()
+    fmd=snaputil.load_cpickle_file("%s.pkl" % (file_))
+    if fmd:
+        end = time.time()
+        taken = end-start
+        #sys.stderr.write("time taken to load samples from pickle: %d\n" % taken)
+        return fmd
+    start = time.time()
     fmd={}
     #dont need the hash-on-column headers just yet
-    with open(file_) as f:
+    with open(file_,"r") as f:
        for line in f:
-           fields=line.rstrip().split("\t")
+           line = line.rstrip()
+           fields=line.split("\t")
            fmd[fields[0]]=line
+    end = time.time()
+    taken = end-start
+    #sys.stderr.write("time taken to load samples from normal: %d\n" % taken)
+    snaputil.store_cpickle_file("%s.pkl" % (file_),fmd)
     return fmd
-
-import urllib
-MAX_SOLR_ROWS=1000000000
-def stream_solr(solr_query,filter_set=None,sample_set=None,debug_mode=False):
-    header_just_id='intropolis_sample_id_i'
-    solr_url = "%s%s&wt=csv&csv.separator=%%09&rows=%d&fl=%s" % (SAMPLE_URL,urllib.quote_plus(solr_query),MAX_SOLR_ROWS,header_just_id)
-    if debug_mode:
-        sys.stderr.write("opening %s\n" % (solr_url))
-    solrR = urllib2.urlopen(solr_url)
-    if debug_mode:
-        sys.stderr.write("streaming solr results now (querying done)\n")
-    line=solrR.readline()
-    while(line):
-        line=line.rstrip()
-        fields=line.split("\t")
-        if sample_set != None:
-            sample_set.add(fields[SAMPLE_ID_COL]) 
-        line=solrR.readline()
-
 
 #do multiple searches by a set of ids
 def search_introns_by_ids(snaptron_ids):
@@ -198,7 +208,8 @@ def search_introns_by_ids(snaptron_ids):
             sys.stderr.write("query %s\n" % (query))
         run_tabix(query,None,TABIX_DBS['snaptron_id'],filter_set=snaptron_ids,print_header=print_header,debug=DEBUG_MODE)
         print_header = False
-             
+
+
 comp_op_pattern=re.compile(r'([=><!]+)')
 def range_query_parser(rangeq,snaptron_ids,rquery_will_be_index=False):
     rquery={}
@@ -262,16 +273,12 @@ def range_query_parser(rangeq,snaptron_ids,rquery_will_be_index=False):
 
 #this does the reverse: given a set of sample ids,
 #return all the introns associated with each sample
-import cPickle
 def intron_ids_from_samples(sample_set):
     start = time.time()
-    sample2introns={}
-    print("setting up sample2intron map")
-    if os.path.exists("./sample2introns.pkl"):
-        f=open("./sample2introns.pkl","rb")
-        sample2introns=cPickle.load(f)
-        f.close()
-    else:
+    sample2introns=snaputil.load_cpickle_file("./sample2introns.pkl")
+    #print("setting up sample2intron map")
+    if not sample2introns:
+        sample2introns={}
         #f=open("/data2/gigatron2/all_SRA_introns_ids_stats.tsv.new","r")
         f=gzip.open("%s/%s" % (TABIX_DB_PATH,TABIX_INTERVAL_DB),"r")
         print("opened gzip file for introns")
@@ -287,22 +294,21 @@ def intron_ids_from_samples(sample_set):
                     sample2introns[sample_id]=set()
                 sample2introns[sample_id].add(int(fields[0]))
             num_lines+=1
-            if num_lines % 10000 == 0:
-                print("loaded %d introns" % (num_lines))
+            #if num_lines % 10000 == 0:
+            #    print("loaded %d introns" % (num_lines))
         f.close()
-    print("about to write pkl file")
-    if not os.path.exists("./sample2introns.pkl"):
-        f=open("./sample2introns.pkl","wb")
-        cPickle.dump(sample2introns,f,cPickle.HIGHEST_PROTOCOL)
-        f.close()
-    print("pkl file written")
+    #print("about to write pkl file")
+    snaputil.store_cpickle_file("./sample2introns.pkl",sample2introns)
+    #print("pkl file written")
     end = time.time()
     taken=end-start
-    print("loaded introns in %d" % (taken))
+    if DEBUG_MODE:
+        sys.stderr.write("loaded %d samples2introns in %d\n" % (len(sample2introns),taken))
     introns_seen=set()
     for sample_id in sample_set:
         introns_seen.update(sample2introns[sample_id])
-    sys.stdout.write("s2I\t%s\n" % (str(len(introns_seen))))
+    if DEBUG_MODE:
+        sys.stderr.write("s2I\t%s\n" % (str(len(introns_seen))))
     return introns_seen
     
 #cases:
@@ -326,12 +332,14 @@ def main():
     #if we have any sample related queries, do them first to get sample id set
     if len(sampleq) >= 1:
         #stream_solr(sampleq,sample_set=sample_set)
-        (sample_fields,sample_query) = parse_sample_query(sampleq)
         sample_set = set()
-        search_samples_lucene(sample_map,sample_fields,sample_query,sample_set,stream_sample_metadata=True)
+        search_samples_lucene(sample_map,sampleq,sample_set,stream_sample_metadata=False)
         if DEBUG_MODE_:
-            sys.stderr.write("found %d samples matching sample metadata fields/query: %s %s\n" % (len(sample_set),sample_fields,sample_query))
+            sys.stderr.write("found %d samples matching sample metadata fields/query\n" % (len(sample_set)))
         snaptron_ids = intron_ids_from_samples(sample_set)
+        #if no snaptron_ids were found we're done in keeping with the strict AND policy (currently)
+        if len(snaptron_ids) == 0:
+            return
     #whether or not we use the interval query as a filter set or the whole query
     rquery_index = len(intervalq) < 1 and len(rangeq) >= 1
     #now parse the range querie(s) (this can include one by_id hack search which would be a list of one or more ids)
@@ -351,3 +359,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+
