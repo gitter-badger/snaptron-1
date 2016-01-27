@@ -27,3 +27,5 @@ curl -vv -G "http://128.220.35.129:8443/snaptron/?rquery=chr6:1-10000000|samples
 curl -vv -G "http://stingray.cs.jhu.edu:8443/snaptron/?rquery=chr6:1-10000000|samples_countEQ5|"
 
 curl http://stingray.cs.jhu.edu:8443/snaptron/?rquery='chr6:1-10000000|samples_count=5|'
+
+curl http://stingray.cs.jhu.edu:8100/33401689-33401829,samples_count=5,coverage_avg=1|library_construction_protocol_t::BransonAND250ANDSonifier'
