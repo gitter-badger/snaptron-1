@@ -28,4 +28,6 @@ curl -vv -G "http://stingray.cs.jhu.edu:8443/snaptron/?rquery=chr6:1-10000000|sa
 
 curl http://stingray.cs.jhu.edu:8443/snaptron/?rquery='chr6:1-10000000|samples_count=5|'
 
-curl http://stingray.cs.jhu.edu:8100/33401689-33401829,samples_count=5,coverage_avg=1|library_construction_protocol_t::BransonAND250ANDSonifier'
+#why does this run slow?
+#because snaptron is running tabix on the samples_count column which is relatively low information, need to fix this
+curl http://stingray.cs.jhu.edu:8100/snaptron/?rquery='|snaptron_id=33401689-33401829,samples_count=5,coverage_avg=1|library_construction_protocol_t::BransonAND250ANDSonifier'
