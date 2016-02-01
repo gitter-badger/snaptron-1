@@ -1,5 +1,15 @@
 #!/usr/bin/env python2.7
 import operator
+import re
+from org.apache.lucene.index import IndexReader
+from org.apache.lucene.index import Term
+from org.apache.lucene.search import NumericRangeQuery
+from org.apache.lucene.document import Document, Field, IntField, FloatField, StringField, TextField, StoredField
+
+TERM = Term
+NIR = NumericRangeQuery.newIntRange
+NFR = NumericRangeQuery.newFloatRange
+
 #from collections import namedtuple
 #bunch of constants for use throughout snaptron
 
@@ -13,7 +23,16 @@ SAMPLE_MD_FILE='/data2/gigatron2/all_illumina_sra_for_human_ids.tsv'
 SAMPLE_IDS_COL=12
 SAMPLE_ID_COL=0
 INTRON_ID_COL=0
-LUCENE_MAX_HITS=1000
+#set much larger than the total # of introns we expect to have
+LUCENE_MAX_RANGE_HITS=100000000
+#set much larger than the total # of samples we expect to have
+LUCENE_MAX_SAMPLE_HITS=1000000
+
+LUCENE_TYPES={'snaptron_id':[IntField,int,NIR],'length':[IntField,int,NIR],'strand':[StringField,str,TERM],'annotated?':[IntField,int,NIR],'left_motif':[StringField,str,TERM],'right_motif':[StringField,str,TERM],'left_annotated?':[TextField,str,TERM],'right_annotated?':[TextField,str,TERM],'length':[IntField,int,NIR],'samples_count':[IntField,int,NIR],'coverage_sum':[IntField,int,NIR],'coverage_avg':[FloatField,float,NFR],'coverage_median':[FloatField,float,NFR],'source_dataset_id':[IntField,int,NIR],'coverage_avg2':[FloatField,float,NFR],'coverage_median2':[FloatField,float,NFR]}
+
+RANGE_QUERY_DELIMITER=','
+RANGE_QUERY_OPS='([=><!]+)'
+RANGE_QUERY_FIELD_PATTERN=re.compile(RANGE_QUERY_OPS)
 SAMPLE_QUERY_DELIMITER='==='
 SAMPLE_QUERY_FIELD_DELIMITER='::'
 

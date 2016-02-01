@@ -16,7 +16,11 @@ from java.io import File
 from org.apache.lucene.analysis.standard import StandardAnalyzer
 from org.apache.lucene.document import Document, Field
 from org.apache.lucene.search import IndexSearcher
+from org.apache.lucene.search import BooleanQuery
+from org.apache.lucene.search import TermQuery
+from org.apache.lucene.search import NumericRangeQuery
 from org.apache.lucene.index import IndexReader
+from org.apache.lucene.index import Term
 from org.apache.lucene.queryparser.classic import QueryParser
 from org.apache.lucene.queryparser.classic import MultiFieldQueryParser
 from org.apache.lucene.search import BooleanClause
@@ -33,6 +37,10 @@ lucene.initVM()
 analyzer = StandardAnalyzer(Version.LUCENE_4_10_1)
 reader = IndexReader.open(SimpleFSDirectory(File("lucene/")))
 searcher = IndexSearcher(reader)
+
+#setup lucene reader for range related searches
+rreader = IndexReader.open(SimpleFSDirectory(File("/data2/gigatron2/lucene_ranges/")))
+rsearcher = IndexSearcher(rreader)
 
 def run_tabix(qargs,rquerys,tabix_db,filter_set=None,sample_set=None,filtering=False,print_header=True,debug=True):
     tabix_db = "%s/%s" % (snapconf.TABIX_DB_PATH,tabix_db)
@@ -80,13 +88,67 @@ def run_tabix(qargs,rquerys,tabix_db,filter_set=None,sample_set=None,filtering=F
     if filtering:
         return ids_found
 
+def lucene_sample_query_parse(sampleq):
+    queries_ = sampleq.split(snapconf.SAMPLE_QUERY_DELIMITER)
+    fields = []
+    queries = []
+    booleans = []
+    for query_tuple in queries_:
+        #(field,query) = query_tuple.split(snapconf.SAMPLE_QUERY_FIELD_DELIMITER)
+        fields.append(field)
+        query = query.replace('AND',' AND ')
+        #sys.stderr.write("query + fields: %s %s\n" % (query,field))
+        queries.append(query)
+        booleans.append(BooleanClause.Occur.MUST)
+    return (fields,queries,booleans)
+
+
+def lucene_range_query_parse(query_string):
+    '''parse the user's range query string into something pylucene can understand'''
+    query = BooleanQuery()
+    queries_ = query_string.split(snapconf.RANGE_QUERY_DELIMITER)
+    start = None
+    end = None
+    start_inclusive = True
+    end_inclusive = True
+    for query_tuple in queries_:
+        m=snapconf.RANGE_QUERY_FIELD_PATTERN.search(query_tuple)
+        (col,op_,val)=re.split(snapconf.RANGE_QUERY_OPS,query_tuple)
+        if not m or not col or col not in snapconf.TABIX_DBS or col not in snapconf.LUCENE_TYPES:
+            continue
+        op=m.group(1)
+        if op not in snapconf.operators:
+            sys.stderr.write("bad operator %s in range query,exiting\n" % (str(op)))
+            sys.exit(-1)
+        (ltype,ptype,qtype) = snapconf.LUCENE_TYPES[col]
+        rquery = None
+        if ptype == str:
+            rquery = TermQuery(qtype(col,str(val)))
+        else:
+            #assume operator == '='
+            (start,end) = (ptype(val),ptype(val)) 
+            if op == '>=':
+                end = None 
+            if op == '<=':
+                start = None 
+            if op == '<':
+                start = None
+                end_inclusive = False
+            if op == '>':
+                end = None
+                start_inclusive = False
+            rquery = qtype(col,start,end,start_inclusive,end_inclusive)
+        query.add(rquery,BooleanClause.Occur.MUST)
+        #sys.stderr.write("query + fields: %s %s\n" % (query,field))
+    return query
+
 #based on the example code at
 #http://graus.nu/blog/pylucene-4-0-in-60-seconds-tutorial/
 def search_samples_lucene(sample_map,sampleq,sample_set,stream_sample_metadata=False):
-    (fields,queries,booleans) = lucene_query_parse(sampleq)
+    (fields,queries,booleans) = lucene_sample_query_parse(sampleq)
     query = MultiFieldQueryParser.parse(Version.LUCENE_4_10_1, queries, fields, booleans, analyzer)
     #query = MultiFieldQueryParser.parse(Version.LUCENE_4_10_1, ['human AND adult AND brain'], ['description_t'], [BooleanClause.Occur.MUST], analyzer)
-    hits = searcher.search(query, snapconf.LUCENE_MAX_HITS)
+    hits = searcher.search(query, snapconf.LUCENE_MAX_SAMPLE_HITS)
     if DEBUG_MODE: 
         sys.stderr.write("Found %d document(s) that matched query '%s':\n" % (hits.totalHits, sampleq))
     if stream_sample_metadata:
@@ -100,25 +162,33 @@ def search_samples_lucene(sample_map,sampleq,sample_set,stream_sample_metadata=F
         #stream back the full sample metadata record from the in-memory dictionary
         if stream_sample_metadata:
             sys.stdout.write("%s:S\t%s\n" % (snapconf.DATA_SOURCE,sample_map[sid]))
-            
+
+
+#based on the example code at
+#http://graus.nu/blog/pylucene-4-0-in-60-seconds-tutorial/
+def search_ranges_lucene(rangeq,snaptron_ids,stream_back=False):
+    parsed_query = lucene_range_query_parse(rangeq)
+    hits = rsearcher.search(parsed_query, snapconf.LUCENE_MAX_RANGE_HITS)
+    if DEBUG_MODE: 
+        sys.stderr.write("Found %d document(s) that matched range query '%s':\n" % (hits.totalHits, parsed_query))
+    if stream_back:
+        sys.stdout.write("DataSource:Type\t%s\n" % (snapconf.INTRON_HEADER))
+    for hit in hits.scoreDocs:
+        doc = rsearcher.doc(hit.doc)
+        sid = doc.get("snaptron_id")
+        #stream back the full record from the record in Lucene
+        if stream_back and (snaptron_ids == None or sid in snaptron_ids):
+            sys.stdout.write("%s:I\t%s\n" % (snapconf.DATA_SOURCE,doc.get('all')))
+        #track the sample ids if asked to
+        elif snaptron_ids != None:
+            snaptron_ids.add(sid)
+           
+ 
 def stream_samples(sample_set,sample_map):
     sys.stdout.write("DataSource:Type\t%s\n" % (snapconf.SAMPLE_HEADER))
     for sample_id in sample_set:
         sys.stdout.write("%s:S\t%s\n" % (snapconf.DATA_SOURCE,sample_map[sample_id]))
 
-def lucene_query_parse(sampleq):
-    queries_ = sampleq.split(snapconf.SAMPLE_QUERY_DELIMITER)
-    fields = []
-    queries = []
-    booleans = []
-    for query_tuple in queries_:
-        (field,query) = query_tuple.split(snapconf.SAMPLE_QUERY_FIELD_DELIMITER)
-        fields.append(field)
-        query = query.replace('AND',' AND ')
-        #sys.stderr.write("query + fields: %s %s\n" % (query,field))
-        queries.append(query)
-        booleans.append(BooleanClause.Occur.MUST)
-    return (fields,queries,booleans)
 
 #use to load samples metadata to be returned
 #ONLY when the user requests by overlap coords OR
@@ -171,8 +241,132 @@ def search_introns_by_ids(snaptron_ids):
         print_header = False
 
 
+
+#this does the reverse: given a set of sample ids,
+#return all the introns associated with each sample
+def intron_ids_from_samples(sample_set,snaptron_ids):
+    start = time.time()
+    sample2introns=snaputil.load_cpickle_file("./sample2introns.pkl")
+    #print("setting up sample2intron map")
+    if not sample2introns:
+        sample2introns={}
+        #f=open("/data2/gigatron2/all_SRA_introns_ids_stats.tsv.new","r")
+        f=gzip.open("%s/%s" % (snapconf.TABIX_DB_PATH,snapconf.TABIX_INTERVAL_DB),"r")
+        print("opened gzip file for introns")
+        num_lines = 0
+        for line in f:
+            if "gigatron_id" in line or "snaptron_id" in line:
+                continue
+            fields=line.rstrip().split('\t')
+            sample_ids=fields[snapconf.SAMPLE_IDS_COL].split(',')
+            #just map the intron id
+            for sample_id in sample_ids:
+                if sample_id not in sample2introns:
+                    sample2introns[sample_id]=set()
+                sample2introns[sample_id].add(int(fields[0]))
+            num_lines+=1
+            #if num_lines % 10000 == 0:
+            #    print("loaded %d introns" % (num_lines))
+        f.close()
+    #print("about to write pkl file")
+    snaputil.store_cpickle_file("./sample2introns.pkl",sample2introns)
+    #print("pkl file written")
+    end = time.time()
+    taken=end-start
+    if DEBUG_MODE:
+        sys.stderr.write("loaded %d samples2introns in %d\n" % (len(sample2introns),taken))
+    introns_seen=set()
+    for sample_id in sample_set:
+        introns_seen.update(sample2introns[sample_id])
+    if DEBUG_MODE:
+        sys.stderr.write("s2I\t%s\n" % (str(len(introns_seen))))
+    snaptron_ids.update(introns_seen)
+    #return introns_seen
+    
+def range_query_parser(rangeq,snaptron_ids):
+    '''this method is only used if we need to *filter* by one or more ranges during an interval or sample search'''
+    rquery={}
+    if rangeq is None or len(rangeq) < 1:
+        return (None,None,rquery)
+    fields = rangeq.split(',')
+    for field in fields:
+        m=snapconf.RANGE_QUERY_FIELD_PATTERN.search(field)
+        (col,op_,val)=re.split(snapconf.RANGE_QUERY_OPS,field)
+        if not m or not col or col not in snapconf.TABIX_DBS or col not in snapconf.LUCENE_TYPES:
+            continue
+        op=m.group(1)
+        if op not in snapconf.operators:
+            sys.stderr.write("bad operator %s in range query,exiting\n" % (str(op)))
+            sys.exit(-1)
+        #queries by id are a different type of query, we simply record the id
+        #and then move on, if there is only a id query that will be caught higher up
+        if col == 'snaptron_id':
+            snaptron_ids.update(set(val.split('-')))
+            continue
+        (ltype,ptype,qtype) = snapconf.LUCENE_TYPES[col]
+        if op != '=' and ptype == str:
+            sys.stderr.write("operator must be '=' for type string comparison in range query (it was %s), exiting\n" % (str(op)))
+            sys.exit(-1)
+        val=ptype(val)
+        rquery[col]=(snapconf.operators[op],val)
+        return rquery
+
+#cases:
+#1) just interval (one function call)
+#2) interval + range query(s) (one tabix function call + field filter(s))
+#3) one or more range queries (one tabix range function call + field filter(s))
+#4) interval + sample (2 function calls: 1 lucene for sample filter + 1 tabix using snaptron_id filter)
+#5old) sample (1 lucene call -> use interval ids to return all intervals)
+#5) sample (1 lucene call -> use snaptron_ids to do a by_ids search (multiple tabix calls))
+#6) sample + range query(s) (2 function calls: 1 lucene for sample filter + 1 tabix using snaptron_id filter + field filter)
+def main():
+    input_ = sys.argv[1]
+    DEBUG_MODE_=DEBUG_MODE
+    if len(sys.argv) > 2:
+        DEBUG_MODE_=True
+    (intervalq,rangeq,sampleq,idq) = input_.split('|')
+    sample_map = load_sample_metadata(snapconf.SAMPLE_MD_FILE)
+    if DEBUG_MODE_:
+        sys.stderr.write("loaded %d samples metadata\n" % (len(sample_map)))
+
+    #first we build filter-by-snaptron_id list based either (or both) on passed ids directly
+    #or what's dervied from the sample query
+    snaptron_ids = set()
+    if len(idq) >= 1:
+        snaptron_ids.update(set(idq.split(',')))
+    #if we have any sample related queries, do them first to get sample id set
+    if len(sampleq) >= 1:
+        #stream_solr(sampleq,sample_set=sample_set)
+        sample_set = set()
+        search_samples_lucene(sample_map,sampleq,sample_set,stream_sample_metadata=False)
+        if DEBUG_MODE_:
+            sys.stderr.write("found %d samples matching sample metadata fields/query\n" % (len(sample_set)))
+        intron_ids_from_samples(sample_set,snaptron_ids)
+        #if no snaptron_ids were found we're done, in keeping with the strict AND policy (currently)
+        if len(snaptron_ids) == 0:
+            return
+    #NOW start normal query processing between: 1) interval 2) range or 3) or just snaptron ids
+    #note: 1) and 3) use tabix, 2) uses lucene
+    sample_set = set()
+    #if len(snaptron_ids) > 0 and len(intervalq) == 0 and (len(rangeq) == 0 or not first_tdb):
+    #back to usual processing, interval queries come first possibly with filters from the point range queries and/or ids
+    if len(intervalq) >= 1:
+        rquery = range_query_parser(rangeq,snaptron_ids)
+        run_tabix(intervalq,rquery,snapconf.TABIX_INTERVAL_DB,filter_set=snaptron_ids,sample_set=sample_set,debug=DEBUG_MODE_)
+    #if there's no interval query to use with tabix, use a point range query (first_rquery) with additional filters from the following point range queries and/or ids
+    elif len(rangeq) >= 1:
+        #run_tabix(first_rquery,rquery,first_tdb,filter_set=snaptron_ids,sample_set=sample_set,debug=DEBUG_MODE_)
+        search_ranges_lucene(rangeq,snaptron_ids,stream_back=True)
+    elif len(snaptron_ids) > 0:
+        search_introns_by_ids(snaptron_ids)
+
+if __name__ == '__main__':
+    main()
+
+
+#####deprecated
 comp_op_pattern=re.compile(r'([=><!]+)')
-def range_query_parser(rangeq,snaptron_ids,rquery_will_be_index=False):
+def range_query_parser_deprecated(rangeq,snaptron_ids,rquery_will_be_index=False):
     rquery={}
     #snaptron_ids = []
     if rangeq is None or len(rangeq) < 1:
@@ -231,93 +425,3 @@ def range_query_parser(rangeq,snaptron_ids,rquery_will_be_index=False):
             val=val+1
         first_rquery="1:%d%s" % (val,extension)
     return (first_tdb,first_rquery,rquery)
-
-#this does the reverse: given a set of sample ids,
-#return all the introns associated with each sample
-def intron_ids_from_samples(sample_set):
-    start = time.time()
-    sample2introns=snaputil.load_cpickle_file("./sample2introns.pkl")
-    #print("setting up sample2intron map")
-    if not sample2introns:
-        sample2introns={}
-        #f=open("/data2/gigatron2/all_SRA_introns_ids_stats.tsv.new","r")
-        f=gzip.open("%s/%s" % (snapconf.TABIX_DB_PATH,snapconf.TABIX_INTERVAL_DB),"r")
-        print("opened gzip file for introns")
-        num_lines = 0
-        for line in f:
-            if "gigatron_id" in line or "snaptron_id" in line:
-                continue
-            fields=line.rstrip().split('\t')
-            sample_ids=fields[snapconf.SAMPLE_IDS_COL].split(',')
-            #just map the intron id
-            for sample_id in sample_ids:
-                if sample_id not in sample2introns:
-                    sample2introns[sample_id]=set()
-                sample2introns[sample_id].add(int(fields[0]))
-            num_lines+=1
-            #if num_lines % 10000 == 0:
-            #    print("loaded %d introns" % (num_lines))
-        f.close()
-    #print("about to write pkl file")
-    snaputil.store_cpickle_file("./sample2introns.pkl",sample2introns)
-    #print("pkl file written")
-    end = time.time()
-    taken=end-start
-    if DEBUG_MODE:
-        sys.stderr.write("loaded %d samples2introns in %d\n" % (len(sample2introns),taken))
-    introns_seen=set()
-    for sample_id in sample_set:
-        introns_seen.update(sample2introns[sample_id])
-    if DEBUG_MODE:
-        sys.stderr.write("s2I\t%s\n" % (str(len(introns_seen))))
-    return introns_seen
-    
-#cases:
-#1) just interval (one function call)
-#2) interval + range query(s) (one tabix function call + field filter(s))
-#3) one or more range queries (one tabix range function call + field filter(s))
-#4) interval + sample (2 function calls: 1 lucene for sample filter + 1 tabix using snaptron_id filter)
-#5old) sample (1 lucene call -> use interval ids to return all intervals)
-#5) sample (1 lucene call -> use snaptron_ids to do a by_ids search (multiple tabix calls))
-#6) sample + range query(s) (2 function calls: 1 lucene for sample filter + 1 tabix using snaptron_id filter + field filter)
-def main():
-    input_ = sys.argv[1]
-    DEBUG_MODE_=DEBUG_MODE
-    if len(sys.argv) > 2:
-        DEBUG_MODE_=True
-    (intervalq,rangeq,sampleq) = input_.split('|')
-    sample_map = load_sample_metadata(snapconf.SAMPLE_MD_FILE)
-    if DEBUG_MODE_:
-        sys.stderr.write("loaded %d samples metadata\n" % (len(sample_map)))
-    snaptron_ids = set()
-    #if we have any sample related queries, do them first to get sample id set
-    if len(sampleq) >= 1:
-        #stream_solr(sampleq,sample_set=sample_set)
-        sample_set = set()
-        search_samples_lucene(sample_map,sampleq,sample_set,stream_sample_metadata=False)
-        if DEBUG_MODE_:
-            sys.stderr.write("found %d samples matching sample metadata fields/query\n" % (len(sample_set)))
-        snaptron_ids = intron_ids_from_samples(sample_set)
-        #if no snaptron_ids were found we're done in keeping with the strict AND policy (currently)
-        if len(snaptron_ids) == 0:
-            return
-    #whether or not we use the interval query as a filter set or the whole query
-    rquery_index = len(intervalq) < 1 and len(rangeq) >= 1
-    #now parse the range querie(s) (this can include one by_id hack search which would be a list of one or more ids)
-    (first_tdb,first_rquery,rquery) = range_query_parser(rangeq,snaptron_ids,rquery_will_be_index=rquery_index)
-    #UPDATE if someone wants both by_ids and other queries we'll give them both by passing snaptron_ids later to the tabix method as a filter
-    #otherwise we do by_id queries only
-    #sample_set is used to track samples we pick up from introns queried to stream them later (if desired)
-    sample_set = set()
-    if len(snaptron_ids) > 0 and len(intervalq) == 0 and (len(rangeq) == 0 or not first_tdb):
-        search_introns_by_ids(snaptron_ids)
-    #back to usual processing, interval queries come first possibly with filters from the point range queries and/or ids
-    elif len(intervalq) >= 1:
-        run_tabix(intervalq,rquery,snapconf.TABIX_INTERVAL_DB,filter_set=snaptron_ids,sample_set=sample_set,debug=DEBUG_MODE_)
-    #if there's no interval query to use with tabix, use a point range query (first_rquery) with additional filters from the following point range queries and/or ids
-    elif len(rangeq) >= 1:
-        run_tabix(first_rquery,rquery,first_tdb,filter_set=snaptron_ids,sample_set=sample_set,debug=DEBUG_MODE_)
-
-if __name__ == '__main__':
-    main()
-
