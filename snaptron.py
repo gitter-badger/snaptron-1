@@ -177,7 +177,7 @@ def search_ranges_lucene(rangeq,snaptron_ids,stream_back=False):
         doc = rsearcher.doc(hit.doc)
         sid = doc.get("snaptron_id")
         #stream back the full record from the record in Lucene
-        if stream_back and (snaptron_ids == None or sid in snaptron_ids):
+        if stream_back and (snaptron_ids == None or len(snaptron_ids) == 0 or sid in snaptron_ids):
             sys.stdout.write("%s:I\t%s\n" % (snapconf.DATA_SOURCE,doc.get('all')))
         #track the sample ids if asked to
         elif snaptron_ids != None:
