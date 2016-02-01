@@ -42,6 +42,25 @@ searcher = IndexSearcher(reader)
 rreader = IndexReader.open(SimpleFSDirectory(File("/data2/gigatron2/lucene_ranges/")))
 rsearcher = IndexSearcher(rreader)
 
+def filter_by_ranges(fields,rquerys):
+    skip=False
+    for rfield in rquerys.keys():
+        (op,rval)=rquerys[rfield]
+        if rfield not in snapconf.INTRON_HEADER_FIELDS_MAP:
+            sys.stderr.write("bad field %s in range query,exiting\n" % (rfield))
+            sys.exit(-1)
+        fidx = snapconf.INTRON_HEADER_FIELDS_MAP[rfield]
+        (ltype,ptype,qtype) = snapconf.LUCENE_TYPES[rfield]
+        val=ptype(fields[fidx])
+        #val = float(fields[fidx])
+        #if rfield not in snapconf.FLOAT_FIELDS:
+        #    val = int(val)
+        if not op(val,rval):
+            skip=True
+            break
+    return skip
+
+
 def run_tabix(qargs,rquerys,tabix_db,filter_set=None,sample_set=None,filtering=False,print_header=True,debug=True):
     tabix_db = "%s/%s" % (snapconf.TABIX_DB_PATH,tabix_db)
     if debug:
@@ -60,22 +79,8 @@ def run_tabix(qargs,rquerys,tabix_db,filter_set=None,sample_set=None,filtering=F
              if sample_set != None:
                  sample_set.update(set(fields[snapconf.SAMPLE_IDS_COL].split(",")))
         #filter return stream based on range queries (if any)
-        if rquerys:
-            skip=False
-            for rfield in rquerys.keys():
-                (op,rval)=rquerys[rfield]
-                if rfield not in snapconf.INTRON_HEADER_FIELDS_MAP:
-                    sys.stderr.write("bad field %s in range query,exiting\n" % (rfield))
-                    sys.exit(-1)
-                fidx = snapconf.INTRON_HEADER_FIELDS_MAP[rfield]
-                val = float(fields[fidx])
-                if rfield not in snapconf.FLOAT_FIELDS:
-                    val = int(val)
-                if not op(val,rval):
-                    skip=True
-                    break
-            if skip:
-                continue
+        if rquerys and filter_by_ranges(fields,rquerys):
+            continue
         if filtering:
             ids_found.add(fields[snapconf.INTRON_ID_COL])
             continue
@@ -217,7 +222,7 @@ def load_sample_metadata(file_):
     return fmd
 
 #do multiple searches by a set of ids
-def search_introns_by_ids(snaptron_ids):
+def search_introns_by_ids(snaptron_ids,rquery):
     sid_queries = []
     start_sid = 1    
     end_sid = 1
@@ -237,7 +242,7 @@ def search_introns_by_ids(snaptron_ids):
     for query in sid_queries:
         if DEBUG_MODE:
             sys.stderr.write("query %s\n" % (query))
-        run_tabix(query,None,snapconf.TABIX_DBS['snaptron_id'],filter_set=snaptron_ids,print_header=print_header,debug=DEBUG_MODE)
+        run_tabix(query,rquery,snapconf.TABIX_DBS['snaptron_id'],filter_set=snaptron_ids,print_header=print_header,debug=DEBUG_MODE)
         print_header = False
 
 
@@ -348,17 +353,19 @@ def main():
     #NOW start normal query processing between: 1) interval 2) range or 3) or just snaptron ids
     #note: 1) and 3) use tabix, 2) uses lucene
     sample_set = set()
+    #UPDATE: prefer tabix queries of either interval or snaptron_ids rather than lucene search of range queries due to speed
     #if len(snaptron_ids) > 0 and len(intervalq) == 0 and (len(rangeq) == 0 or not first_tdb):
     #back to usual processing, interval queries come first possibly with filters from the point range queries and/or ids
     if len(intervalq) >= 1:
         rquery = range_query_parser(rangeq,snaptron_ids)
         run_tabix(intervalq,rquery,snapconf.TABIX_INTERVAL_DB,filter_set=snaptron_ids,sample_set=sample_set,debug=DEBUG_MODE_)
-    #if there's no interval query to use with tabix, use a point range query (first_rquery) with additional filters from the following point range queries and/or ids
+    elif len(snaptron_ids) >= 1:
+        rquery = range_query_parser(rangeq,snaptron_ids)
+        search_introns_by_ids(snaptron_ids,rquery)
+    #finally if there's no interval OR id query to use with tabix, use a point range query (first_rquery) with additional filters from the following point range queries and/or ids in lucene
     elif len(rangeq) >= 1:
         #run_tabix(first_rquery,rquery,first_tdb,filter_set=snaptron_ids,sample_set=sample_set,debug=DEBUG_MODE_)
         search_ranges_lucene(rangeq,snaptron_ids,stream_back=True)
-    elif len(snaptron_ids) > 0:
-        search_introns_by_ids(snaptron_ids)
 
 if __name__ == '__main__':
     main()
