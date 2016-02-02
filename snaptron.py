@@ -90,8 +90,8 @@ def run_tabix(qargs,rquerys,tabix_db,filter_set=None,sample_set=None,filtering=F
     exitc=tabixp.wait() 
     if exitc != 0:
         raise RuntimeError("%s %s %s returned non-0 exit code\n" % (snapconf.TABIX,tabix_db,qargs))
-    if filtering:
-        return ids_found
+    #if filtering:
+    return ids_found
 
 def lucene_sample_query_parse(sampleq):
     queries_ = sampleq.split(snapconf.SAMPLE_QUERY_DELIMITER)
@@ -222,7 +222,7 @@ def load_sample_metadata(file_):
     return fmd
 
 #do multiple searches by a set of ids
-def search_introns_by_ids(snaptron_ids,rquery):
+def search_introns_by_ids(snaptron_ids,rquery,filtering=False):
     sid_queries = []
     start_sid = 1    
     end_sid = 1
@@ -239,13 +239,15 @@ def search_introns_by_ids(snaptron_ids,rquery):
            end_sid = sid
     sid_queries.append("1:%d-%d" % (start_sid,end_sid))
     print_header = True
+    found_snaptron_ids = set()
     for query in sid_queries:
         if DEBUG_MODE:
             sys.stderr.write("query %s\n" % (query))
-        run_tabix(query,rquery,snapconf.TABIX_DBS['snaptron_id'],filter_set=snaptron_ids,print_header=print_header,debug=DEBUG_MODE)
+        ids = run_tabix(query,rquery,snapconf.TABIX_DBS['snaptron_id'],filtering=filtering,filter_set=snaptron_ids,print_header=print_header,debug=DEBUG_MODE)
+        if filtering:
+            found_snaptron_ids.update(ids)
         print_header = False
-
-
+    return found_snaptron_ids
 
 #this does the reverse: given a set of sample ids,
 #return all the introns associated with each sample

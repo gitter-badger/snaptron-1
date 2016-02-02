@@ -1,6 +1,8 @@
 #!/usr/bin/env python2.7
 import operator
 import re
+
+import lucene
 from org.apache.lucene.index import IndexReader
 from org.apache.lucene.index import Term
 from org.apache.lucene.search import NumericRangeQuery
