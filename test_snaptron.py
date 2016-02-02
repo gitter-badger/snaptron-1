@@ -12,11 +12,12 @@ IQs=['chr1:10160-10161']
 #RQs=['1:100000-100000','1:5-5']
 #IRQs are a set of combination of indexes from IQs and RQs
 RQs=[{'length':[snapconf.operators['='],54]}]
-IDs=[set(['33401689','33401829'])]
+IDs=[set(['33401689','33401829']),set(['6','9'])]
 #holds the set of intropolis ids for each specific query for the original SRA set of inropolis junctions
 EXPECTED_IIDS={
                IQs[0]:set(['0','1','2','3','4','5','6','9','10','11','13','14','15','16','17','18','20','21','22','23','24','26','27','28','29','30','31','32','33','34','35','36','37','38']),
                IQs[0]+str(RQs[0]):set(['0','6','9']),
+               IQs[0]+str(RQs[0])+str(IDs[1]):set(['6','9']),
                str(IDs[0]):set(['33401689','33401829'])
               }
 
@@ -78,6 +79,15 @@ class TestTabixCalls(unittest.TestCase):
         #get intropolis ids
         iids = self.itcr(IQs[i], RQs[r], filtering=True)
         self.assertEqual(iids, EXPECTED_IIDS[IQs[i]+str(RQs[r])])
+    
+    def test_basic_interval_and_range_and_ids(self):
+        '''make sure we're getting back an expected set of intropolis ids'''
+        i = 0
+        r = 0
+        d = 1
+        #get intropolis ids
+        iids = self.itcr(IQs[i], RQs[r], filter_set=IDs[d], filtering=True)
+        self.assertEqual(iids, EXPECTED_IIDS[IQs[i]+str(RQs[r])+str(IDs[d])])
     
     def test_basic_ids(self):
         '''make sure we're getting back an expected set of intropolis ids'''
