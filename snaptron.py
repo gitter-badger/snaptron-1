@@ -61,37 +61,45 @@ def filter_by_ranges(fields,rquerys):
     return skip
 
 
-def run_tabix(qargs,rquerys,tabix_db,filter_set=None,sample_set=None,filtering=False,print_header=True,debug=True):
+def run_tabix(qargs,rquerys,tabix_db,intron_filters=None,sample_filters=None,save_introns=False,save_samples=False,stream_back=True,print_header=True,debug=True):
     tabix_db = "%s/%s" % (snapconf.TABIX_DB_PATH,tabix_db)
+    filter_by_introns = (intron_filters != None and len(intron_filters) > 0)
+    filter_by_samples = (sample_filters != None and len(sample_filters) > 0)
     if debug:
         sys.stderr.write("running %s %s %s\n" % (snapconf.TABIX,tabix_db,qargs))
-    if not filtering and print_header:
+    if not stream_back and print_header:
         sys.stdout.write("DataSource:Type\t%s\n" % (snapconf.INTRON_HEADER))
     ids_found=set()
+    samples_set=set()
     tabixp = subprocess.Popen("%s %s %s | cut -f 2-" % (snapconf.TABIX,tabix_db,qargs),stdout=subprocess.PIPE,shell=True)
     for line in tabixp.stdout:
         fields=line.rstrip().split("\t")
-        #build either filter set or sample set or both
-        if (sample_set != None and len(sample_set) > 0) or (filter_set != None and len(filter_set) > 0):
-             if filter_set != None and fields[snapconf.INTRON_ID_COL] not in filter_set:
-                 #sys.stderr.write("field %s not in filter_set\n" % (fields[snapconf.INTRON_ID_COL]))
-                 continue
-             if sample_set != None:
-                 sample_set.update(set(fields[snapconf.SAMPLE_IDS_COL].split(",")))
-        #filter return stream based on range queries (if any)
+        #now filter, this order is important (filter first, than save ids/print)
+        if filter_by_introns and fields[snapconf.INTRON_ID_COL] not in intron_filters:
+            #sys.stderr.write("field %s not in filter_set\n" % (fields[snapconf.INTRON_ID_COL]))
+            continue
         if rquerys and filter_by_ranges(fields,rquerys):
             continue
-        if filtering:
-            ids_found.add(fields[snapconf.INTRON_ID_COL])
-            continue
-        #now just stream back the result
-        else:
+        #combine these two so we only have to split sample <= 1 times
+        if filter_by_samples or save_samples:
+            samples = set(fields[snapconf.SAMPLE_IDS_COL].split(","))
+            if filter_by_samples:
+                have_samples = sample_filters.intersection(samples)
+                if len(have_samples) == 0:
+                    #sys.stderr.write("field %s not in filter_set\n" % (fields[snapconf.INTRON_ID_COL]))
+                    continue
+            if save_samples:
+                sample_set.update(samples)
+        #filter return stream based on range queries (if any)
+        if stream_back:
             sys.stdout.write("%s:I\t%s" % (snapconf.DATA_SOURCE,line))
+        if save_introns:
+            ids_found.add(fields[snapconf.INTRON_ID_COL])
     exitc=tabixp.wait() 
     if exitc != 0:
         raise RuntimeError("%s %s %s returned non-0 exit code\n" % (snapconf.TABIX,tabix_db,qargs))
-    #if filtering:
-    return ids_found
+    return (ids_found,samples_set)
+
 
 def lucene_sample_query_parse(sampleq):
     queries_ = sampleq.split(snapconf.SAMPLE_QUERY_DELIMITER)
@@ -243,7 +251,7 @@ def search_introns_by_ids(snaptron_ids,rquery,filtering=False):
     for query in sid_queries:
         if DEBUG_MODE:
             sys.stderr.write("query %s\n" % (query))
-        ids = run_tabix(query,rquery,snapconf.TABIX_DBS['snaptron_id'],filtering=filtering,filter_set=snaptron_ids,print_header=print_header,debug=DEBUG_MODE)
+        (ids,sample_ids) = run_tabix(query,rquery,snapconf.TABIX_DBS['snaptron_id'],intron_filters=snaptron_ids,save_introns=filtering,print_header=print_header,debug=DEBUG_MODE)
         if filtering:
             found_snaptron_ids.update(ids)
         print_header = False
@@ -292,9 +300,9 @@ def intron_ids_from_samples(sample_set,snaptron_ids):
     
 def range_query_parser(rangeq,snaptron_ids):
     '''this method is only used if we need to *filter* by one or more ranges during an interval or sample search'''
-    rquery={}
+    rquery=None
     if rangeq is None or len(rangeq) < 1:
-        return (None,None,rquery)
+        return None
     fields = rangeq.split(',')
     for field in fields:
         m=snapconf.RANGE_QUERY_FIELD_PATTERN.search(field)
@@ -314,9 +322,25 @@ def range_query_parser(rangeq,snaptron_ids):
         if op != '=' and ptype == str:
             sys.stderr.write("operator must be '=' for type string comparison in range query (it was %s), exiting\n" % (str(op)))
             sys.exit(-1)
+        if not rquery:
+            rquery = {}
         val=ptype(val)
         rquery[col]=(snapconf.operators[op],val)
-        return rquery
+    return rquery
+
+def parse_id_query(idq,snaptron_ids,sample_ids):
+    fields = idq.split(';')
+    if len(fields) > 2:
+        sys.stderr.write("upto 2 ID fields allowed (snaptron_id and/or sample_id) in the ID query section, exiting\n")
+        sys.exit(-1)
+    snaptron_ids = set()
+    sample_ids = set()
+    for field in fields:
+        (id_type,ids) = field.split(':')
+        if id_type == 'snaptron_id':
+            snaptron_ids.update(set(ids.split(',')))
+        else:
+            sample_ids.update(set(ids.split(',')))
 
 #cases:
 #1) just interval (one function call)
@@ -336,31 +360,47 @@ def main():
     if DEBUG_MODE_:
         sys.stderr.write("loaded %d samples metadata\n" % (len(sample_map)))
 
-    #first we build filter-by-snaptron_id list based either (or both) on passed ids directly
-    #or what's dervied from the sample query
+    #first we build filter-by-snaptron_id list based either (or all) on passed ids directly
+    #and/or what's dervied from the sample query and/or what sample ids were passed in as well
+    #NOTE this is the only place where we have OR logic, i.e. the set of snaptron_ids passed in
+    #and the set of snaptron_ids dervied from the passed in sample_ids are OR'd together in the filtering
     snaptron_ids = set()
     if len(idq) >= 1:
-        snaptron_ids.update(set(idq.split(',')))
-    #if we have any sample related queries, do them first to get sample id set
+        sample_ids = set()
+        parse_id_query(idq,snaptron_ids,sample_ids)
+        if len(sample_ids) > 0:
+            intron_ids_from_samples(sample_ids,snaptron_ids)
+        #didn't get any snaptron ids here, assuming AND, we quit
+        if len(snaptron_ids) == 0:
+            return
+
+    #if we have any sample related queries, do them to get snaptron_id filter set
     if len(sampleq) >= 1:
-        #stream_solr(sampleq,sample_set=sample_set)
-        sample_set = set()
-        search_samples_lucene(sample_map,sampleq,sample_set,stream_sample_metadata=False)
+        sample_ids = set()
+        search_samples_lucene(sample_map,sampleq,sample_ids,stream_sample_metadata=False)
         if DEBUG_MODE_:
-            sys.stderr.write("found %d samples matching sample metadata fields/query\n" % (len(sample_set)))
-        intron_ids_from_samples(sample_set,snaptron_ids)
+            sys.stderr.write("found %d samples matching sample metadata fields/query\n" % (len(sample_ids)))
+        snaptron_ids_from_samples = set()
+        intron_ids_from_samples(sample_ids,snaptron_ids_from_samples)
+        if len(snaptron_ids) > 0 and len(snaptron_ids_from_samples) > 0:
+            snaptron_ids = snaptron_ids.intersection(snaptron_ids_from_samples)
+        elif len(snaptron_ids_from_samples) > 0:
+            snaptron_ids = snaptron_ids_from_samples
         #if no snaptron_ids were found we're done, in keeping with the strict AND policy (currently)
         if len(snaptron_ids) == 0:
             return
+
+    #end result here is that we have a list of snaptron_ids to filter by
+
     #NOW start normal query processing between: 1) interval 2) range or 3) or just snaptron ids
     #note: 1) and 3) use tabix, 2) uses lucene
-    sample_set = set()
+    #sample_set = set()
     #UPDATE: prefer tabix queries of either interval or snaptron_ids rather than lucene search of range queries due to speed
     #if len(snaptron_ids) > 0 and len(intervalq) == 0 and (len(rangeq) == 0 or not first_tdb):
     #back to usual processing, interval queries come first possibly with filters from the point range queries and/or ids
     if len(intervalq) >= 1:
         rquery = range_query_parser(rangeq,snaptron_ids)
-        run_tabix(intervalq,rquery,snapconf.TABIX_INTERVAL_DB,filter_set=snaptron_ids,sample_set=sample_set,debug=DEBUG_MODE_)
+        run_tabix(intervalq,rquery,snapconf.TABIX_INTERVAL_DB,intron_filters=snaptron_ids,debug=DEBUG_MODE_)
     elif len(snaptron_ids) >= 1:
         rquery = range_query_parser(rangeq,snaptron_ids)
         search_introns_by_ids(snaptron_ids,rquery)
