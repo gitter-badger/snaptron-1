@@ -48,11 +48,12 @@ class TestTabixCalls(unittest.TestCase):
     def itc(self,interval_query,filter_set=None,sample_set=None,filtering=False):
         '''wrap the normal run_tabix call to hardcode defaults for interval querying'''
         range_query = None
-        return tc(interval_query,range_query,tdbs['chromosome'],filter_set=filter_set,sample_set=sample_set,filtering=filtering)
+        #return tc(interval_query,range_query,tdbs['chromosome'],filter_set=filter_set,sample_set=sample_set,filtering=filtering)
+        return tc(interval_query,range_query,tdbs['chromosome'],intron_filters=filter_set,sample_filters=sample_set,save_introns=filtering)
     
     def itcr(self,interval_query,range_query,filter_set=None,sample_set=None,filtering=False):
         '''wrap the normal run_tabix call to hardcode defaults for interval querying AND range filtering'''
-        return tc(interval_query,range_query,tdbs['chromosome'],filter_set=filter_set,sample_set=sample_set,filtering=filtering)
+        return tc(interval_query,range_query,tdbs['chromosome'],intron_filters=filter_set,sample_filters=sample_set,save_introns=filtering)
     
     def idc(self,ids,filtering=False):
         '''wrap the normal run_tabix call to hardcode defaults for interval querying AND range filtering'''
@@ -69,7 +70,7 @@ class TestTabixCalls(unittest.TestCase):
         '''make sure we're getting back an expected set of intropolis ids'''
         i = 0
         #get intropolis ids
-        iids = self.itc(IQs[i], filtering=True)
+        (iids,sids) = self.itc(IQs[i], filtering=True)
         self.assertEqual(iids, EXPECTED_IIDS[IQs[i]])
     
     def test_basic_interval_and_range(self):
@@ -77,7 +78,7 @@ class TestTabixCalls(unittest.TestCase):
         i = 0
         r = 0
         #get intropolis ids
-        iids = self.itcr(IQs[i], RQs[r], filtering=True)
+        (iids,sids) = self.itcr(IQs[i], RQs[r], filtering=True)
         self.assertEqual(iids, EXPECTED_IIDS[IQs[i]+str(RQs[r])])
     
     def test_basic_interval_and_range_and_ids(self):
@@ -86,7 +87,7 @@ class TestTabixCalls(unittest.TestCase):
         r = 0
         d = 1
         #get intropolis ids
-        iids = self.itcr(IQs[i], RQs[r], filter_set=IDs[d], filtering=True)
+        (iids,sids) = self.itcr(IQs[i], RQs[r], filter_set=IDs[d], filtering=True)
         self.assertEqual(iids, EXPECTED_IIDS[IQs[i]+str(RQs[r])+str(IDs[d])])
     
     def test_basic_ids(self):
