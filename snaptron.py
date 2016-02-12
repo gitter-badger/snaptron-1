@@ -274,14 +274,15 @@ def intron_ids_from_samples(sample_set,snaptron_ids):
                 continue
             fields=line.rstrip().split('\t')
             sample_ids=fields[snapconf.SAMPLE_IDS_COL].split(',')
+            #print("loading line %s" % line) 
             #just map the intron id
             for sample_id in sample_ids:
                 if sample_id not in sample2introns:
                     sample2introns[sample_id]=set()
-                sample2introns[sample_id].add(int(fields[0]))
+                sample2introns[sample_id].add(int(fields[snapconf.INTRON_ID_COL+1]))
             num_lines+=1
-            #if num_lines % 10000 == 0:
-            #    print("loaded %d introns" % (num_lines))
+            if num_lines % 10000 == 0:
+                print("loaded %d introns" % (num_lines))
         f.close()
     #print("about to write pkl file")
     snaputil.store_cpickle_file("./sample2introns.pkl",sample2introns)
@@ -333,8 +334,6 @@ def parse_id_query(idq,snaptron_ids,sample_ids):
     if len(fields) > 2:
         sys.stderr.write("upto 2 ID fields allowed (snaptron_id and/or sample_id) in the ID query section, exiting\n")
         sys.exit(-1)
-    snaptron_ids = set()
-    sample_ids = set()
     for field in fields:
         (id_type,ids) = field.split(':')
         if id_type == 'snaptron_id':
