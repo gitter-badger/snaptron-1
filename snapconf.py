@@ -25,6 +25,13 @@ SAMPLE_MD_FILE='/data2/gigatron2/all_illumina_sra_for_human_ids.tsv'
 SAMPLE_IDS_COL=12
 SAMPLE_ID_COL=0
 INTRON_ID_COL=0
+
+#search by gene constants
+REFSEQ_ANNOTATION='refFlat.hg19.txt.sorted'
+INTERVAL_PATTERN = re.compile(r'^chr[12]?[0-9XYM]:\d+-\d+$')
+CHROM_PATTERN = re.compile(r'^chr[12]?[0-9XYM]$')
+MAX_GENE_PROXIMITY = 10000
+
 #set much larger than the total # of introns we expect to have
 LUCENE_MAX_RANGE_HITS=100000000
 #set much larger than the total # of samples we expect to have

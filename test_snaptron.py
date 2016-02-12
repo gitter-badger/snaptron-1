@@ -8,17 +8,18 @@ import snaputil
 import snaptron
 
 #set of test interval queries
-IQs=['chr1:10160-10161']
+IQs=['chr1:10160-10161','CD99']
 #RQs=['1:100000-100000','1:5-5']
 #IRQs are a set of combination of indexes from IQs and RQs
-RQs=[{'length':[snapconf.operators['='],54]}]
+RQs=[{'length':[snapconf.operators['='],54]},{'samples_count':[snapconf.operators['='],10]}]
 IDs=[set(['33401689','33401829']),set(['6','9'])]
 #holds the set of intropolis ids for each specific query for the original SRA set of inropolis junctions
 EXPECTED_IIDS={
                IQs[0]:set(['0','1','2','3','4','5','6','9','10','11','13','14','15','16','17','18','20','21','22','23','24','26','27','28','29','30','31','32','33','34','35','36','37','38']),
                IQs[0]+str(RQs[0]):set(['0','6','9']),
                IQs[0]+str(RQs[0])+str(IDs[1]):set(['6','9']),
-               str(IDs[0]):set(['33401689','33401829'])
+               str(IDs[0]):set(['33401689','33401829']),
+               IQs[1]+str(RQs[1]):set(['41341710','41341711','41341836','41342617','41343142','41343152','41343193','42691062','42691119','42691141','42691142'])
               }
 
 def setUpModule():
@@ -31,6 +32,7 @@ def tearDownModule():
 tc = snaptron.run_tabix
 rqp = snaptron.range_query_parser
 sbi = snaptron.search_introns_by_ids
+sbg = snaptron.search_by_gene_name
 
 tdbs = snapconf.TABIX_DBS
 
@@ -45,15 +47,11 @@ class TestTabixCalls(unittest.TestCase):
     def setUp(self):
         pass
    
-    def itc(self,interval_query,filter_set=None,sample_set=None,filtering=False):
-        '''wrap the normal run_tabix call to hardcode defaults for interval querying'''
-        range_query = None
-        #return tc(interval_query,range_query,tdbs['chromosome'],filter_set=filter_set,sample_set=sample_set,filtering=filtering)
-        return tc(interval_query,range_query,tdbs['chromosome'],intron_filters=filter_set,sample_filters=sample_set,save_introns=filtering)
-    
-    def itcr(self,interval_query,range_query,filter_set=None,sample_set=None,filtering=False):
-        '''wrap the normal run_tabix call to hardcode defaults for interval querying AND range filtering'''
-        return tc(interval_query,range_query,tdbs['chromosome'],intron_filters=filter_set,sample_filters=sample_set,save_introns=filtering)
+    def itc(self,interval_query,range_query=None,filter_set=None,sample_set=None,filtering=False):
+        '''wrap the normal run_tabix/search_by_gene_name call to hardcode defaults for interval/gene name querying'''
+        if snapconf.INTERVAL_PATTERN.search(interval_query): 
+            return tc(interval_query,range_query,tdbs['chromosome'],intron_filters=filter_set,sample_filters=sample_set,save_introns=filtering)
+        return sbg(interval_query,range_query,intron_filters=filter_set,save_introns=filtering) 
     
     def idc(self,ids,filtering=False):
         '''wrap the normal run_tabix call to hardcode defaults for interval querying AND range filtering'''
@@ -62,8 +60,7 @@ class TestTabixCalls(unittest.TestCase):
     def idcr(self,ids,range_query):
         '''wrap the normal run_tabix call to hardcode defaults for interval querying AND range filtering'''
         return sbi(ids,range_query)
-   
-
+    
 
 #actual tests 
     def test_basic_interval(self):
@@ -78,7 +75,7 @@ class TestTabixCalls(unittest.TestCase):
         i = 0
         r = 0
         #get intropolis ids
-        (iids,sids) = self.itcr(IQs[i], RQs[r], filtering=True)
+        (iids,sids) = self.itc(IQs[i], range_query=RQs[r], filtering=True)
         self.assertEqual(iids, EXPECTED_IIDS[IQs[i]+str(RQs[r])])
     
     def test_basic_interval_and_range_and_ids(self):
@@ -87,8 +84,15 @@ class TestTabixCalls(unittest.TestCase):
         r = 0
         d = 1
         #get intropolis ids
-        (iids,sids) = self.itcr(IQs[i], RQs[r], filter_set=IDs[d], filtering=True)
+        (iids,sids) = self.itc(IQs[i], range_query=RQs[r], filter_set=IDs[d], filtering=True)
         self.assertEqual(iids, EXPECTED_IIDS[IQs[i]+str(RQs[r])+str(IDs[d])])
+  
+    def test_basic_gene_name_and_range(self):
+        i = 1
+        r = 1
+        #get intropolis ids
+        (iids,sids) = self.itc(IQs[i], RQs[r], filtering=True)
+        self.assertEqual(iids, EXPECTED_IIDS[IQs[i]+str(RQs[r])])
     
     def test_basic_ids(self):
         '''make sure we're getting back an expected set of intropolis ids'''

@@ -341,6 +341,52 @@ def parse_id_query(idq,snaptron_ids,sample_ids):
         else:
             sample_ids.update(set(ids.split(',')))
 
+
+def search_by_gene_name(geneq,rquery,intron_filters=None,save_introns=False):
+    gene_map = {}
+    with open("%s/%s" % (snapconf.TABIX_DB_PATH,snapconf.REFSEQ_ANNOTATION),"r") as f:
+        for line in f:
+            fields = line.rstrip().split('\t')
+            (gene_name,chrom,st,en) = (fields[0].upper(),fields[2],int(fields[4]),int(fields[5]))
+            if not snapconf.CHROM_PATTERN.search(chrom):
+                continue
+            if gene_name in gene_map:
+                add_tuple = True
+                if chrom in gene_map[gene_name]:
+                    for (idx,gene_tuple) in enumerate(gene_map[gene_name][chrom]):
+                        (st2,en2) = gene_tuple
+                        if abs(en2-en) <= snapconf.MAX_GENE_PROXIMITY:
+                            add_tuple = False
+                            if st < st2:
+                                gene_map[gene_name][chrom][idx][0] = st
+                            if en > en2:
+                                gene_map[gene_name][chrom][idx][1] = en
+                #add onto current set of coordinates
+                if add_tuple:
+                    if chrom not in gene_map[gene_name]:
+                        gene_map[gene_name][chrom]=[]
+                    gene_map[gene_name][chrom].append([st,en]) 
+            else:
+                gene_map[gene_name]={}
+                gene_map[gene_name][chrom]=[[st,en]]
+    geneq = geneq.upper()
+    if geneq not in gene_map:
+        sys.stderr.write("ERROR no gene found by name %s\n" % (geneq))
+        sys.exit(-1)
+    print_header = True
+    iids = set()
+    sids = set()
+    for (chrom,coord_tuples) in sorted(gene_map[geneq].iteritems()):
+        for coord_tuple in coord_tuples:
+            (st,en) = coord_tuple
+            (iids_,sids_) = run_tabix("%s:%d-%d" % (chrom,st,en),rquery,snapconf.TABIX_INTERVAL_DB,intron_filters=intron_filters,print_header=print_header,save_introns=save_introns)
+            print_header = False
+            if save_introns:
+                iids.update(iids_)
+                sids.update(sids_)
+    return (iids,sids)
+
+
 #cases:
 #1) just interval (one function call)
 #2) interval + range query(s) (one tabix function call + field filter(s))
@@ -399,7 +445,10 @@ def main():
     #back to usual processing, interval queries come first possibly with filters from the point range queries and/or ids
     if len(intervalq) >= 1:
         rquery = range_query_parser(rangeq,snaptron_ids)
-        run_tabix(intervalq,rquery,snapconf.TABIX_INTERVAL_DB,intron_filters=snaptron_ids,debug=DEBUG_MODE_)
+        if snapconf.INTERVAL_PATTERN.search(intervalq):
+            run_tabix(intervalq,rquery,snapconf.TABIX_INTERVAL_DB,intron_filters=snaptron_ids,debug=DEBUG_MODE_)
+        else:
+            search_by_gene_name(intervalq,rquery,intron_filters=snaptron_ids)
     elif len(snaptron_ids) >= 1:
         rquery = range_query_parser(rangeq,snaptron_ids)
         search_introns_by_ids(snaptron_ids,rquery)
