@@ -33,7 +33,7 @@ echo "2" > expected_wc
 curl "http://$HOST:$PORT/$SRV/samples?sfilter=run_accession:DRR001622" 2>/dev/null | wc -l > test_wc
 diff test_wc expected_wc
 
-curl 'http://$HOST:$PORT/$SRV/snaptron?regions=chr11:82970135-82997450&rfilter=samples_count>:100&rfilter=coverage_sum>:1000&sfilter=description:cortex' 2>/dev/null | cut -f 2 | egrep -v -e 'id' | sort -u > test_15_ids
+curl "http://$HOST:$PORT/$SRV/snaptron?regions=chr11:82970135-82997450&rfilter=samples_count>:100&rfilter=coverage_sum>:1000&sfilter=description:cortex" 2>/dev/null | cut -f 2 | egrep -v -e 'id' | sort -u > test_15_ids
 diff test_s2i_ids_15.snaptron_ids test_15_ids 
 
 echo "4" > expected_wc
@@ -53,6 +53,10 @@ diff test_wc expected_wc
 #diff test_wc expected_wc
 
 echo "35" > expected_wc
+curl "http://$HOST:$PORT/$SRV/annotations?regions=CD99&contains=1" 2>/dev/null | wc -l > test_wc
+diff test_wc expected_wc
+
+echo "42" > expected_wc
 curl "http://$HOST:$PORT/$SRV/annotations?regions=CD99" 2>/dev/null | wc -l > test_wc
 diff test_wc expected_wc
 
