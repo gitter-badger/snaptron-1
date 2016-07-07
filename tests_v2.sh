@@ -10,7 +10,7 @@ fi
 
 #system tests (roundtrip)
 echo "26" > expected_wc
-python ./$SRV/snaptron.py 'regions=chr11:82970135-82997450&rfilter=samples_count>:100&rfilter=coverage_sum>:1000' 2> /dev/null | wc -l > test_wc
+python ./snaptron.py 'regions=chr11:82970135-82997450&rfilter=samples_count>:100&rfilter=coverage_sum>:1000' 2> /dev/null | wc -l > test_wc
 diff test_wc expected_wc
 
 echo "26" > expected_wc
