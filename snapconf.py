@@ -9,10 +9,10 @@ from org.apache.lucene.search import NumericRangeQuery
 from org.apache.lucene.document import Document, Field, IntField, FloatField, StringField, TextField, StoredField
 
 #####fields that need to be changed for a different instance
-DATA_SOURCE='SRAv2'
+DATA_SOURCE='SRAv2b'
 IP='127.0.0.1'
-PORT=1556
-SERVER_STRING='http://stingray.cs.jhu.edu:8090/srav2/'
+PORT=1656
+SERVER_STRING='http://stingray.cs.jhu.edu:8090/srav2b/'
 HG='hg19'
 BIGWIG2WIG="bigWigToWig"
 ROOT_DIR='./'
@@ -26,8 +26,10 @@ TABIX_IDS_DB='by_idV2.gz'
 ID_START_COL=2
 CUT_START_COL=1
 #sqlite3 dbs
+#TODO change to snaptronV2.samples.sqlite3
 SAMPLE_SQLITE_DB="%s/by_sample_ids.v2.sqlite3" % (TABIX_DB_PATH)
-SNAPTRON_SQLITE_DB="%s/snaptronV2.sqlite3" % (TABIX_DB_PATH)
+#SNAPTRON_SQLITE_DB="%s/snaptronV2.sqlite3" % (TABIX_DB_PATH)
+SNAPTRON_SQLITE_DB="%s/snaptronV2.intervals_regions.sqlite3" % (TABIX_DB_PATH)
 #Lucene dbs
 LUCENE_SAMPLE_DB="%s/lucene_v2/" % (TABIX_DB_PATH)
 LUCENE_RANGE_DB="%s/lucene_ranges_v1/" % (TABIX_DB_PATH)

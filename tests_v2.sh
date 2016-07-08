@@ -2,7 +2,7 @@
 source python/bin/activate
 export HOST=stingray.cs.jhu.edu
 export PORT=8090
-export SRV=srav2
+export SRV=srav2b
 
 if [ -z $1 ] ; then
     python test_snaptron.py
