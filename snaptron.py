@@ -277,7 +277,7 @@ def search_sqlite3(intervalq,rangeq,region_args=default_region_args,stream_back=
     sids = set()
     sample_set = set()
     for result in results:
-        snaptron_id = result[snapconf.INTRON_ID_COL]
+        snaptron_id = str(result[snapconf.INTRON_ID_COL])
         #combine these two so we only have to split sample <= 1 times
         if filter_by_samples or ra.save_samples:
             samples = set(result[snapconf.SAMPLE_IDS_COL].split(","))
@@ -290,9 +290,9 @@ def search_sqlite3(intervalq,rangeq,region_args=default_region_args,stream_back=
         if filter_by_introns and snaptron_id not in ra.intron_filter:
             continue
         if stream_back:
-            streamer_method(sys.stdout,"\t".join(str(x) for x in result),result,region_args=ra)
+            streamer_method(sys.stdout,"%s\n" % "\t".join(str(x) for x in result),result,region_args=ra)
         if ra.save_introns:
-            sids.add(str(snaptron_id))
+            sids.add(snaptron_id)
     return (sids,sample_set)
 
 #based on the example code at
