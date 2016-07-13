@@ -27,6 +27,7 @@ ID_START_COL=2
 CUT_START_COL=1
 #sqlite3 dbs
 #TODO change to snaptronV2.samples.sqlite3
+SAMPLE_FTS_SQLITE_DB="%s/snaptronV2.samples.sqlite3" % (TABIX_DB_PATH)
 SAMPLE_SQLITE_DB="%s/by_sample_ids.v2.sqlite3" % (TABIX_DB_PATH)
 #SNAPTRON_SQLITE_DB="%s/snaptronV2.sqlite3" % (TABIX_DB_PATH)
 SNAPTRON_SQLITE_DB="%s/snaptronV2.intervals_regions.sqlite3" % (TABIX_DB_PATH)
