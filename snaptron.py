@@ -460,7 +460,7 @@ def query_ids(idq,snaptron_ids):
 def query_regions(intervalq,rangeq,snaptron_ids,filtering=False,region_args=default_region_args):
     rquery = range_query_parser(rangeq,snaptron_ids)
     #intervals/genes are OR'd, but all ranges are ANDed together with each interval/gene search
-    print_header = True
+    print_header = region_args.print_header
     snaptron_ids_returned = set()
     sample_ids_returned = set()
     gc = snannotation.GeneCoords()
@@ -481,7 +481,7 @@ def query_regions(intervalq,rangeq,snaptron_ids,filtering=False,region_args=defa
 
 
 def process_params(input_,region_args=default_region_args):
-    params = {'regions':[],'ids':[],'rfilter':[],'sfilter':[],'fields':[],'result_count':False,'contains':'0','return_format':TSV,'score_by':'samples_count'}
+    params = {'regions':[],'ids':[],'rfilter':[],'sfilter':[],'fields':[],'result_count':False,'contains':'0','return_format':TSV,'score_by':'samples_count','header':'1'}
     params_ = input_.split('&')
     for param_ in params_:
         (key,val) = param_.split("=")
@@ -509,7 +509,7 @@ def process_params(input_,region_args=default_region_args):
                 params[key].append(val) 
             else:
                 params[key]=val
-    ra=region_args._replace(post=False,result_count=params['result_count'],contains=bool(int(params['contains'])),score_by=params['score_by'],return_format=params['return_format'],original_input_string=input_)
+    ra=region_args._replace(post=False,result_count=params['result_count'],contains=bool(int(params['contains'])),score_by=params['score_by'],print_header=bool(int(params['header'])),return_format=params['return_format'],original_input_string=input_)
     return (params['regions'],params['ids'],{'rfilter':params['rfilter']},params['sfilter'],ra)
 
 
