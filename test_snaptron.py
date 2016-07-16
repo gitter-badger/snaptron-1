@@ -15,7 +15,7 @@ IQs=['chr1:10160-10161','CD99','chr11:82970135-82997450','chr11:82985784-8298976
 #IRQs are a set of combination of indexes from IQs and RQs
 #RQs=[{'length':[snapconf.operators['='],54]},{'samples_count':[snapconf.operators['='],10]}]
 RQs=[{'length':[snapconf.operators[':'],54]},{'samples_count':[snapconf.operators[':'],10]}]
-RQs_flat=['length:54','samples_count:10','coverage_avg>2.0','samples_count>:100','coverage_sum>:1000','samples_count:15000','coverage_avg>20']
+RQs_flat=['length:54','samples_count:10','coverage_avg>2.0','samples_count>:100','coverage_sum>:1000','samples_count:1500','coverage_avg>20']
 IDs=[set(['33401689','33401829']),set(['6','9'])]
 #holds the set of intropolis ids for each specific query for the original SRA set of inropolis junctions
 EXPECTED_IIDS={
@@ -27,7 +27,8 @@ EXPECTED_IIDS={
                #IQs[2]+str(RQs_flat[1])+str(RQs_flat[2]):set(['7474725','7474726','7475267']),
                IQs[2]+str(RQs_flat[1])+str(RQs_flat[2]):set([]),
                IQs[3]+str(RQs_flat[3])+str(RQs_flat[4]):set(['14075114','14075109']),
-               str(RQs_flat[5])+str(RQs_flat[6]):set(['1900915','17229066','14511883','18158500','19434757'])
+               #str(RQs_flat[5])+str(RQs_flat[6]):set(['1900915','17229066','14511883','18158500','19434757'])
+               str(RQs_flat[5])+str(RQs_flat[6]):set(['21266715','59043106'])
               }
 
 def setUpModule():
@@ -44,7 +45,8 @@ srl = snaptron.search_ranges_sqlite3
 sbi = snaptron.search_introns_by_ids
 sbg = snaptron.search_by_gene_name
 
-pjq = snaptron.parse_json_query
+#pjq = snaptron.parse_json_query
+pjq = snaptron.process_post_params
 pp = snaptron.process_params
 
 qr = snaptron.query_regions
@@ -88,10 +90,10 @@ class TestTabixCalls(unittest.TestCase):
         '''tests to see if our json parsing for the original hacky query language works'''
         query = "'[{\"intervals\":[\"chr6:1-10000000\"],\"samples_count\":[{\"op\":\":\",\"val\":5}],\"ids\":[1,4]}]'"
         (iq,rq,sq,idq,ra) = pjq(query)
-        self.assertEqual(iq[0],"chr6:1-10000000")
-        self.assertEqual(rq['rfilter'][0],"samples_count:5")
-        self.assertEqual(sq,[])
-        self.assertEqual(idq,[1,4])
+        self.assertEqual(iq[0][0],"chr6:1-10000000")
+        self.assertEqual(rq[0]['rfilter'][0],"samples_count:5")
+        self.assertEqual(sq[0],[])
+        self.assertEqual(idq[0],[1,4])
        
     def test_range_query_parsing(self):
         '''tests the parsing of the string of ranges-as-filters constraints'''
@@ -231,7 +233,6 @@ class TestQueryCalls(unittest.TestCase):
         self.assertEqual(iids, EXPECTED_IIDS[IQs[i]+str(RQs_flat[r])+str(RQs_flat[r+1])])
     
     def test_fp_ranges(self):
-        self.assertEqual(True, False)
         q = 0
         i = 2
         r = 5

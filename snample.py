@@ -86,8 +86,15 @@ def search_samples_lucene(sample_map,sampleq,sample_set,stream_sample_metadata=F
 #when not querying against Lucene
 def stream_samples(sample_set,sample_map):
     sys.stdout.write("DataSource:Type\t%s\n" % (snapconf.SAMPLE_HEADER))
+    num_columns = len(snapconf.SAMPLE_HEADER_FIELDS)
+    default_metadata = "\t".join(["NA" for x in xrange(0,num_columns-1)])
     for sample_id in sorted([int(x) for x in sample_set]):
-        sys.stdout.write("%s:S\t%s\n" % (snapconf.DATA_SOURCE,sample_map[str(sample_id)]))
+        try:
+            sys.stdout.write("%s:S\t%s\n" % (snapconf.DATA_SOURCE,sample_map[str(sample_id)]))
+        #if the sample id is missing just fill with generic 'NA's for now
+        except KeyError,ke:
+            sys.stdout.write("%s:S\t%s\t%s\n" % (snapconf.DATA_SOURCE,str(sample_id),default_metadata))
+            
 
 #use to load samples metadata to be returned
 #ONLY when the user requests by overlap coords OR
@@ -167,8 +174,8 @@ def main():
     ra = snaptron.default_region_args
     sys.stderr.write("INPUT_ %s\n" % input_)
     if input_[0] == '[' or input_[1] == '[' or input_[2] == '[':
-        (intervalq,rangeq,sampleq,idq,ra) = snaptron.parse_json_query(input_)
-        POST=True
+        (or_intervals,or_ranges,or_samples,or_ids,ra) = snaptron.process_post_params(input_)
+        (intervalq,rangeq,sampleq,idq) = (or_intervals[0],or_ranges[0],or_samples[0],or_ids[0])
     else:
         #just stream back the whole sample metadata file
         if 'all=1' in input_:
