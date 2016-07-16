@@ -1,11 +1,12 @@
 #!/usr/bin/env python2.7
 import sys
+import os
 import urllib
 import urllib2
-import time
-import json
 import argparse
 import gzip
+import csv
+import re
 
 import snapconf
 import clsnapconf
@@ -14,19 +15,6 @@ from SnaptronIteratorHTTP import SnaptronIteratorHTTP
 #TODO use python tmp
 TMPDIR='/tmp'
 
-def parse_regions(args):
-    regions = []
-    if '/' in args.regions:
-        with open(args.regions,"r") as fin:
-            for line in fin:
-                line = line.rstrip()
-                regions.append(line)
-    else:
-        regions = args.regions.split('|')
-    return regions
-
-import csv
-import re
 def parse_query_params(args):
     queries = []
     groups = []
@@ -91,7 +79,6 @@ def count_sample_coverage_per_group(args, sample_stats, record, group):
             sample_stats[sample_id][group]=0
         sample_stats[sample_id][group]+=int(sample_covs[i])
 
-import os
 def download_sample_metadata(args):
     sample_records = {}
     gfout = None
