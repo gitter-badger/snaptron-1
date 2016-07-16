@@ -40,16 +40,16 @@ def parse_query_params(args):
             group = ''
             if len(record['contains']) > 0:
                 query.append('contains=1')
-            if record['thresholds'] is not None:
+            if record['thresholds'] is not None and len(record['thresholds']) > 0:
                 thresholds = record['thresholds']
                 thresholds = re.sub("=",":",thresholds)
                 thresholds = thresholds.split('&')
                 query.append("&".join(["rfilter=%s" % x for x in thresholds]))
-            if record['filters'] is not None:
+            if record['filters'] is not None and len(record['filters']) > 0:
                 filters = record['filters']
                 filters = filters.split('&')
                 query.append("&".join(["sfilter=%s" % x for x in filters]))
-            if record['group'] is not None:
+            if record['group'] is not None and len(record['group']) > 0:
                 group = record['group']
             if args.function is not None:
                 query.append("header=0")
@@ -63,6 +63,10 @@ def junction_inclusion_ratio(sample_stats,group_list,sample_records):
     group_b = group_list[1]
     sample_scores = {}
     for sample in sample_stats:
+        if group_a not in sample_stats[sample]:
+            sample_stats[sample][group_a]=0
+        if group_b not in sample_stats[sample]:
+            sample_stats[sample][group_b]=0
         numer = sample_stats[sample][group_b] - sample_stats[sample][group_a]
         denom = sample_stats[sample][group_b] + sample_stats[sample][group_a] + 1
         sample_scores[sample]=float(numer/float(denom))
@@ -105,10 +109,7 @@ def download_sample_metadata(args):
     response = urllib2.urlopen("%s/samples?all=1" % (clsnapconf.SERVICE_URL))
     all_records = response.read()
     all_records = all_records.split('\n')
-    #line = response.readline()
-    #while(line is not None):
     for line in all_records:
-        #line = line.rstrip()
         fields = line.split('\t')
         sample_records[fields[0]]=line
         if gfout is not None:
