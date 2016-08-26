@@ -10,12 +10,12 @@ import snaptron
 import snannotation
 
 #set of test interval queries
-IQs=['chr1:10160-10161','CD99','chr11:82970135-82997450','chr11:82985784-82989768']
+IQs=['chr1:10160-10161','CD99','chr11:82970135-82997450','chr11:82985784-82989768','chr11:82571908-82571909','chr11:82356629-82403678']
 #RQs=['1:100000-100000','1:5-5']
 #IRQs are a set of combination of indexes from IQs and RQs
 #RQs=[{'length':[snapconf.operators['='],54]},{'samples_count':[snapconf.operators['='],10]}]
 RQs=[{'length':[snapconf.operators[':'],54]},{'samples_count':[snapconf.operators[':'],10]}]
-RQs_flat=['length:54','samples_count:10','coverage_avg>2.0','samples_count>:100','coverage_sum>:1000','samples_count:1500','coverage_avg>20']
+RQs_flat=['length:54','samples_count:10','coverage_avg>2.0','samples_count>:100','coverage_sum>:1000','samples_count:10000','coverage_avg>20']
 IDs=[set(['33401689','33401829']),set(['6','9'])]
 #holds the set of intropolis ids for each specific query for the original SRA set of inropolis junctions
 EXPECTED_IIDS={
@@ -28,7 +28,10 @@ EXPECTED_IIDS={
                IQs[2]+str(RQs_flat[1])+str(RQs_flat[2]):set([]),
                IQs[3]+str(RQs_flat[3])+str(RQs_flat[4]):set(['14075114','14075109']),
                #str(RQs_flat[5])+str(RQs_flat[6]):set(['1900915','17229066','14511883','18158500','19434757'])
-               str(RQs_flat[5])+str(RQs_flat[6]):set(['21266715','59043106'])
+               #str(RQs_flat[5])+str(RQs_flat[6]):set(['21266715','59043106']),
+               str(RQs_flat[5])+str(RQs_flat[6]):set(['41278365']),
+               IQs[4]+str(RQs_flat[3])+str(RQs_flat[4]):set(['14065307']),
+               IQs[5]+str(RQs_flat[3])+str(RQs_flat[4]):set(['14065307','14065333'])
               }
 
 def setUpModule():
@@ -88,9 +91,9 @@ class TestTabixCalls(unittest.TestCase):
 #actual tests 
     def test_basic_json_parsing(self):
         '''tests to see if our json parsing for the original hacky query language works'''
-        query = "'[{\"intervals\":[\"chr6:1-10000000\"],\"samples_count\":[{\"op\":\":\",\"val\":5}],\"ids\":[1,4]}]'"
+        query = "[{\"intervals\":[\"chr6:1-10000000\"],\"samples_count\":[{\"op\":\":\",\"val\":5}],\"ids\":[1,4]}]"
         (iq,rq,sq,idq,ra) = pjq(query)
-        self.assertEqual(iq[0][0],"chr6:1-10000000")
+        self.assertEqual(iq[0][0],'chr6:1-10000000')
         self.assertEqual(rq[0]['rfilter'][0],"samples_count:5")
         self.assertEqual(sq[0],[])
         self.assertEqual(idq[0],[1,4])
@@ -254,6 +257,110 @@ class TestQueryCalls(unittest.TestCase):
         (iids,sids) = qr([iq],rq,set(),filtering=True,region_args=queries['ra'])
         #snaptron.RETURN_ONLY_CONTAINED = False
         self.assertEqual(iids, EXPECTED_IIDS[IQs[i]+str(RQs_flat[r])+str(RQs_flat[r+1])])
+    
+    def test_interval_with_range_query_within_start(self):
+        q = 0
+        i = 5
+        r = 3
+        queries = self.process_query('regions=%s&rfilter=%s&rfilter=%s&within=1' % (IQs[i],RQs_flat[r],RQs_flat[r+1]))
+        iq = queries['iq'][q]
+        rq = queries['rq']
+        (iids,sids) = qr([iq],rq,set(),filtering=True,region_args=queries['ra'])
+        self.assertEqual(iids, EXPECTED_IIDS[IQs[i]+str(RQs_flat[r])+str(RQs_flat[r+1])])
+    
+    def test_interval_with_range_query_not_within_end(self):
+        q = 0
+        i = 4
+        r = 3
+        queries = self.process_query('regions=%s&rfilter=%s&rfilter=%s&within=2' % (IQs[i],RQs_flat[r],RQs_flat[r+1]))
+        iq = queries['iq'][q]
+        rq = queries['rq']
+        (iids,sids) = qr([iq],rq,set(),filtering=True,region_args=queries['ra'])
+        self.assertEqual(iids, set([]))
+    
+    def test_interval_with_range_query_exact(self):
+        q = 0
+        i = 5
+        r = 3
+        queries = self.process_query('regions=%s&rfilter=%s&rfilter=%s&exact=1' % (IQs[i],RQs_flat[r],RQs_flat[r+1]))
+        iq = queries['iq'][q]
+        rq = queries['rq']
+        (iids,sids) = qr([iq],rq,set(),filtering=True,region_args=queries['ra'])
+        self.assertEqual(iids, EXPECTED_IIDS[IQs[i-1]+str(RQs_flat[r])+str(RQs_flat[r+1])])
+    
+    def test_interval_with_range_query_not_exact(self):
+        q = 0
+        i = 4
+        r = 3
+        queries = self.process_query('regions=%s&rfilter=%s&rfilter=%s&exact=1' % (IQs[i],RQs_flat[r],RQs_flat[r+1]))
+        iq = queries['iq'][q]
+        rq = queries['rq']
+        (iids,sids) = qr([iq],rq,set(),filtering=True,region_args=queries['ra'])
+        self.assertEqual(iids, set([]))
+
+import sbreakpoint
+class TestCosmic(unittest.TestCase):
+    '''
+    Test the COSMIC fusion decoding and mapping code.
+    '''
+
+    def setUp(self):
+        pass
+
+    def test_mrna_coord_decoding(self):
+        mrna_exact_coord = '1_535_RET' 
+        is_first = True
+        (gname2, gstart, gend, intron_coord) = sbreakpoint.decode_cosmic_mrna_coord_format(mrna_exact_coord,first_gene=is_first)
+        self.assertEqual(gname2, 'RET')
+        self.assertEqual(gstart, 1)
+        self.assertEqual(gend, 535)
+        self.assertEqual(intron_coord, -1)
+        
+        mrna_exact_coord = '2369_5659' 
+        is_first = False
+        (gname2, gstart, gend, intron_coord) = sbreakpoint.decode_cosmic_mrna_coord_format(mrna_exact_coord,first_gene=is_first)
+        self.assertEqual(gname2, None)
+        self.assertEqual(gstart, 2369)
+        self.assertEqual(gend, 5659)
+        self.assertEqual(intron_coord, -1)
+
+    def test_decoding(self):
+        #-gene,+gene
+        decoded_bp_true = sbreakpoint.BreakPoint('CCDC6','ENST00000263102',1,535,-1,0,"chr10:61665880-61666414",False,'RET','ENST00000355710',2369,5659,-1,11,"chr10:43612032-43625797",False)
+        cosmic_fusion_bp = 'CCDC6{ENST00000263102}:r.1_535_RET{ENST00000355710}:r.2369_5659'
+
+        gc = snannotation.GeneCoords(load_refseq=False, load_canonical=False, load_transcript=True)
+        norms_true = ['chr10:61548521-61665879','chr10:43572517-43612031']
+        (brks, norms, decoded_bp) = sbreakpoint.decode_cosmic_fusion_breakpoint_format(cosmic_fusion_bp, gc.transcript_map)
+        self.assertEqual(decoded_bp, decoded_bp_true)
+        self.assertEqual(norms, norms_true)
+        
+        #+gene,-gene
+        decoded_bp_true = sbreakpoint.BreakPoint('RET','ENST00000355710',1,2369,-1,11,"chr10:43572517-43612179",False,'CCDC6','ENST00000263102',685,5811,-1,1,"chr10:61548521-61612460",False)
+        cosmic_fusion_bp = 'RET{ENST00000355710}:r.1_2369_CCDC6{ENST00000263102}:r.685_5811'
+
+        norms_true = ['chr10:43612180-43625797','chr10:61612461-61666414']
+        (brks, norms, decoded_bp) = sbreakpoint.decode_cosmic_fusion_breakpoint_format(cosmic_fusion_bp, gc.transcript_map)
+        self.assertEqual(decoded_bp, decoded_bp_true)
+        self.assertEqual(norms, norms_true)
+        
+        #+gene,-gene w/ intron
+        decoded_bp_true = sbreakpoint.BreakPoint('RET','ENST00000355710',1,2369,10,11,"chr10:43572517-43612179",False,'CCDC6','ENST00000263102',685,5811,50,1,"chr10:61548521-61612460",False)
+        cosmic_fusion_bp = 'RET{ENST00000355710}:r.1_2369+10_CCDC6{ENST00000263102}:r.685-50_5811'
+
+        norms_true = ['chr10:43612180-43625797','chr10:61612461-61666414']
+        (brks, norms, decoded_bp) = sbreakpoint.decode_cosmic_fusion_breakpoint_format(cosmic_fusion_bp, gc.transcript_map)
+        self.assertEqual(decoded_bp, decoded_bp_true)
+        self.assertEqual(norms, norms_true)
+        
+        #-gene,+gene w/ unknown intron coords
+        decoded_bp_true = sbreakpoint.BreakPoint('CCDC6','ENST00000263102',1,535,-1,0,"chr10:61665880-61666414",False,'RET','ENST00000355710',2369,5659,-1,11,"chr10:43612032-43625797",False)
+        cosmic_fusion_bp = 'CCDC6{ENST00000263102}:r.1_535+?_RET{ENST00000355710}:r.2369-?_5659'
+
+        norms_true = ['chr10:61548521-61665879','chr10:43572517-43612031']
+        (brks, norms, decoded_bp) = sbreakpoint.decode_cosmic_fusion_breakpoint_format(cosmic_fusion_bp, gc.transcript_map)
+        self.assertEqual(decoded_bp, decoded_bp_true)
+        self.assertEqual(norms, norms_true)
    
 if __name__ == '__main__':
     unittest.main()
