@@ -13,7 +13,7 @@ DATA_SOURCE='SRAv2'
 IP='127.0.0.1'
 PORT=1556
 SERVER_STRING='http://stingray.cs.jhu.edu:8090/srav2/'
-HG='hg19'
+HG='hg38'
 BIGWIG2WIG="bigWigToWig"
 ROOT_DIR='./'
 PYTHON_PATH="python"
@@ -32,7 +32,6 @@ SNAPTRON_SQLITE_DB="%s/snaptronV2.sqlite3" % (TABIX_DB_PATH)
 LUCENE_SAMPLE_DB="%s/lucene_v2/" % (TABIX_DB_PATH)
 LUCENE_RANGE_DB="%s/lucene_ranges_v1/" % (TABIX_DB_PATH)
 #gene annotation related flat files
-#need to change to update it to hg38 coordinate/annotations
 REFSEQ_ANNOTATION='refFlat.hg38.txt.sorted'
 CANONICAL_ANNOTATION='hg38.ucsc_known_canonical.tsv'
 SAMPLE_MD_FILE="%s/illumina_sra_for_human_ids.v2.tsv" % (TABIX_DB_PATH)
