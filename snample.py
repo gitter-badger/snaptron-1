@@ -63,7 +63,7 @@ def lucene_sample_query_parse(sampleq):
 
 #based on the example code at
 #http://graus.nu/blog/pylucene-4-0-in-60-seconds-tutorial/
-def search_samples_lucene(sample_map,sampleq,sample_set,stream_sample_metadata=False):
+def search_samples_lucene(sample_map,sampleq,sample_set,ra,stream_sample_metadata=False):
     (fields,queries,booleans) = lucene_sample_query_parse(sampleq)
     #query = MultiFieldQueryParser.parse(Version.LUCENE_4_10_1, queries, fields, booleans, analyzer)
     query = MultiFieldQueryParser.parse(Version.LUCENE_4_10_1, queries, fields, booleans, analyzer_ws)
@@ -72,7 +72,7 @@ def search_samples_lucene(sample_map,sampleq,sample_set,stream_sample_metadata=F
     if DEBUG_MODE: 
         sys.stderr.write("Found %d document(s) that matched query '%s':\n" % (hits.totalHits, sampleq))
     if stream_sample_metadata:
-        sys.stdout.write("DataSource:Type\t%s\n" % (snapconf.SAMPLE_HEADER))
+        sys.stdout.write("DataSource:Type\tLucene TF-IDF Score\t%s\n" % (snapconf.SAMPLE_HEADER))
     for hit in hits.scoreDocs:
         doc = searcher.doc(hit.doc)
         sid = doc.get("intropolis_sample_id_i")
@@ -81,16 +81,23 @@ def search_samples_lucene(sample_map,sampleq,sample_set,stream_sample_metadata=F
             sample_set.add(sid)
         #stream back the full sample metadata record from the in-memory dictionary
         if stream_sample_metadata:
-            sys.stdout.write("%s:S\t%s\n" % (snapconf.DATA_SOURCE,sample_map[sid]))
+            sys.stdout.write("%s:S\t%s\t%s\n" % (snapconf.DATA_SOURCE,str(hit.score),sample_map[sid]))
 
 #when not querying against Lucene
-def stream_samples(sample_set,sample_map):
+def stream_samples(sample_set,sample_map,ra):
     sys.stdout.write("DataSource:Type\t%s\n" % (snapconf.SAMPLE_HEADER))
     num_columns = len(snapconf.SAMPLE_HEADER_FIELDS)
+    if len(ra.sample_fields) > 0:
+        num_columns = len(ra.sample_fields)
     default_metadata = "\t".join(["NA" for x in xrange(0,num_columns-1)])
     for sample_id in sorted([int(x) for x in sample_set]):
+    #for sample_id in sample_set:
         try:
-            sys.stdout.write("%s:S\t%s\n" % (snapconf.DATA_SOURCE,sample_map[str(sample_id)]))
+            if len(ra.sample_fields) > 0:
+                sample_fields = sample_map[str(sample_id)].split('\t')
+                sys.stdout.write("%s:S\t%s\n" % (snapconf.DATA_SOURCE,'\t'.join([sample_fields[int(x)] for x in ra.sample_fields])))
+            else:
+                sys.stdout.write("%s:S\t%s\n" % (snapconf.DATA_SOURCE,sample_map[str(sample_id)]))
         #if the sample id is missing just fill with generic 'NA's for now
         except KeyError,ke:
             sys.stdout.write("%s:S\t%s\t%s\n" % (snapconf.DATA_SOURCE,str(sample_id),default_metadata))
@@ -125,8 +132,11 @@ def sample_ids2intron_ids(sample_ids):
     select = 'SELECT snaptron_ids FROM by_sample_id WHERE sample_id in'
     found_snaptron_ids = set()
     results = snaputil.retrieve_from_db_by_ids(sc,select,sample_ids)
-    for snaptron_ids in results:
-        found_snaptron_ids.update(set(snaptron_ids[0].split(',')))
+    ids = [x[0] for x in results]
+    #for snaptron_ids in results:
+    #    found_snaptron_ids.update(set(snaptron_ids[0].split(',')))
+    s1=','.join(ids)
+    found_snaptron_ids.update(s1.split(','))
     if '' in found_snaptron_ids:
         found_snaptron_ids.remove('')
     return found_snaptron_ids
@@ -148,9 +158,9 @@ def intron_ids_from_samples(sample_ids,snaptron_ids,rquery,filtering=False):
 
 
 
-def query_samples(sampleq,sample_map,snaptron_ids,stream_sample_metadata=False):
+def query_samples(sampleq,sample_map,snaptron_ids,ra,stream_sample_metadata=False):
     sample_ids = set()
-    search_samples_lucene(sample_map,sampleq,sample_ids,stream_sample_metadata=stream_sample_metadata)
+    search_samples_lucene(sample_map,sampleq,sample_ids,ra,stream_sample_metadata=stream_sample_metadata)
     new_snaptron_ids = set() 
     if DEBUG_MODE:
         sys.stderr.write("found %d samples matching sample metadata fields/query\n" % (len(sample_ids)))
@@ -162,10 +172,10 @@ def query_samples(sampleq,sample_map,snaptron_ids,stream_sample_metadata=False):
             new_snaptron_ids = snaptron_ids.intersection(snaptron_ids_from_samples)
     return new_snaptron_ids
 
-def query_by_sample_ids(idq,sample_map):
+def query_by_sample_ids(idq,sample_map,ra):
     if len(idq) == 0:
         return
-    stream_samples(set(idq),sample_map) 
+    stream_samples(set(idq),sample_map,ra) 
 
 def main():
     global DEBUG_MODE
@@ -199,11 +209,11 @@ def main():
         sys.stderr.write("loaded %d samples metadata\n" % (len(sample_map)))
     #main decision cases
     if len(idq) > 0:
-        query_by_sample_ids(idq,sample_map)
+        query_by_sample_ids(idq,sample_map,ra)
     elif len(sampleq) > 0:
         snaptron_ids = set()
         #we're just streaming back sample metadata
-        query_samples(sampleq,sample_map,snaptron_ids,stream_sample_metadata=True)
+        query_samples(sampleq,sample_map,snaptron_ids,ra,stream_sample_metadata=True)
      
 
 if __name__ == '__main__':
