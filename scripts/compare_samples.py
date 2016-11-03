@@ -4,9 +4,11 @@ import snaputil as su
 from bitarray import bitarray
 MAX_ID=81063662
 
-
-#ba1 = su.load_cpickle_file("./sample_ids1_1.pkl", compressed=True)
-#ba2 = su.load_cpickle_file("./sample_ids1_2.pkl", compressed=True)
+COMPRESSED=False
+path='/data3/snaptron/sample_ids_full'
+#path='/data3/snaptron/sample_ids'
+#suffix='.gz'
+suffix=''
 
 def orthem(ba1,ba2):
     ba_final = ba1 | ba2
@@ -22,14 +24,12 @@ def setthem(ba_final):
     #    i+=1
     return s1
 
-ba_final = su.load_cpickle_file("/data3/snaptron/sample_ids/0.pkl.gz", compressed=True)
-for i in xrange(1,131):
-    ba2 = su.load_cpickle_file("/data3/snaptron/sample_ids/%s.pkl.gz" % str(i), compressed=True)
+ba_final = su.load_cpickle_file("%s/0.pkl%s" % (path,suffix), compressed=COMPRESSED)
+for i in xrange(1,1000):
+    ba2 = su.load_cpickle_file("%s/%s.pkl%s" % (path,str(i),suffix), compressed=COMPRESSED)
     if ba2 != None:
         ba_final = orthem(ba2,ba_final)
 
-#ba_final = orthem(ba1,ba2)
 s1 = setthem(ba_final)
 print len(s1)
 #sys.stdout.write(",".join([str(x) for x in s1]))
-

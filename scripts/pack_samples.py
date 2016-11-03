@@ -5,7 +5,7 @@ import snaputil as su
 from bitarray import bitarray
 MAX_ID=81066375
 
-path='/data3/snaptron/sample_ids'
+path='/data3/snaptron/sample_ids_full'
 nthreads_total=8
 
 def pack_sample_mapped_ids(line):    
@@ -26,12 +26,10 @@ def pack_sample_mapped_ids(line):
         ba.append(False)
         i+=1
     #su.store_cpickle_file("./sample_ids1_%s.pkl" % (k),ba, compress=True)
-    su.store_cpickle_file("%s/%s.pkl.gz" % (path,sid), ba, compress=True)
+    su.store_cpickle_file("%s/%s.pkl" % (path,sid), ba, compress=False)
     return True
 
 
-#fin=open("sample_ids1","r")
-#for line in fin:
 batch = []
 count = 0
 for line in sys.stdin:
